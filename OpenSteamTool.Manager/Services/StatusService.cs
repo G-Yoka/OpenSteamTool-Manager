@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Diagnostics;
 using System.Text;
 using OpenSteamTool.Manager.Models;
 
@@ -20,6 +21,7 @@ public sealed class StatusService(
             return new SteamInstallStatus
             {
                 SteamPath = steamPath,
+                SteamVersion = string.Empty,
                 IsValidSteamPath = false,
                 IsSteamRunning = running,
                 IsOpenSteamToolLoaded = loaded
@@ -28,10 +30,12 @@ public sealed class StatusService(
 
         var logDir = Path.Combine(steamPath, "opensteamtool");
         var logFiles = EnumerateLogFiles(logDir).ToList();
+        var steamExe = Path.Combine(steamPath, "steam.exe");
 
         return new SteamInstallStatus
         {
             SteamPath = steamPath,
+            SteamVersion = ReadSteamVersion(steamExe),
             IsValidSteamPath = true,
             IsSteamRunning = running,
             IsOpenSteamToolLoaded = loaded,
@@ -116,5 +120,25 @@ public sealed class StatusService(
                            || Path.GetFileNameWithoutExtension(path).Contains(module, StringComparison.OrdinalIgnoreCase)
                            || Path.GetFileName(path).Contains(module, StringComparison.OrdinalIgnoreCase))
             .OrderBy(Path.GetFileName);
+    }
+
+    private static string ReadSteamVersion(string steamExe)
+    {
+        if (!File.Exists(steamExe))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(steamExe);
+            return !string.IsNullOrWhiteSpace(info.ProductVersion)
+                ? info.ProductVersion
+                : info.FileVersion ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

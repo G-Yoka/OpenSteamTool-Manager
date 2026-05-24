@@ -33,6 +33,9 @@ public partial class MainViewModel : ViewModelBase
     private string steamStateText = string.Empty;
 
     [ObservableProperty]
+    private string steamVersionText = string.Empty;
+
+    [ObservableProperty]
     private string tomlStateText = string.Empty;
 
     [ObservableProperty]
@@ -395,6 +398,7 @@ public partial class MainViewModel : ViewModelBase
             : status.IsValidSteamPath
                 ? (status.IsSteamRunning ? "运行中" : "可用")
                 : "无效";
+        SteamVersionText = string.IsNullOrWhiteSpace(status.SteamVersion) ? "未知" : status.SteamVersion;
         TomlStateText = status.TomlExists ? "存在" : "缺失";
         LuaStateText = status.LuaDirExists ? $"{status.Games.Count} 个配置" : "目录缺失";
         LogStateText = status.LatestLogWriteTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "无日志";
@@ -504,7 +508,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateSummaryText()
     {
-        SummaryText = $"Steam {SteamStateText}；DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配；DLL {DllLoadedStateText}；Lua {Games.Count} 个；TOML {TomlStateText}";
+        SummaryText = $"Steam {SteamStateText}，版本 {SteamVersionText}；DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配；DLL {DllLoadedStateText}；Lua {Games.Count} 个；TOML {TomlStateText}";
     }
 
     private string FormatDllLoadedState(SteamInstallStatus status)
