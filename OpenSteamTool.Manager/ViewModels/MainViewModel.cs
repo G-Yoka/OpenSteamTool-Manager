@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -17,8 +18,11 @@ public partial class MainViewModel : ViewModelBase
     private readonly TomlConfigService _toml;
     private readonly LuaGameConfigService _lua;
     private readonly StatusService _status;
+    private readonly UpdateService _updates;
+    private readonly IAppControlService _appControl;
     private readonly IDialogService _dialogs;
     private readonly ITextPromptService _prompts;
+    private UpdateCheckResult? _latestUpdate;
 
     public ObservableCollection<DllInstallStatus> DllStatuses { get; } = new();
     public ObservableCollection<GameLuaConfig> Games { get; } = new();
@@ -36,6 +40,9 @@ public partial class MainViewModel : ViewModelBase
     private string steamVersionText = string.Empty;
 
     [ObservableProperty]
+    private string appVersionText = string.Empty;
+
+    [ObservableProperty]
     private string tomlStateText = string.Empty;
 
     [ObservableProperty]
@@ -49,6 +56,18 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string dllActionHintText = string.Empty;
+
+    [ObservableProperty]
+    private string updateStateText = string.Empty;
+
+    [ObservableProperty]
+    private string updateDetailText = string.Empty;
+
+    [ObservableProperty]
+    private string updateProgressText = string.Empty;
+
+    [ObservableProperty]
+    private string latestReleaseUrl = string.Empty;
 
     [ObservableProperty]
     private string logsText = string.Empty;
@@ -99,6 +118,8 @@ public partial class MainViewModel : ViewModelBase
         TomlConfigService toml,
         LuaGameConfigService lua,
         StatusService status,
+        UpdateService updates,
+        IAppControlService appControl,
         IDialogService dialogs,
         ITextPromptService prompts)
     {
@@ -108,6 +129,8 @@ public partial class MainViewModel : ViewModelBase
         _toml = toml;
         _lua = lua;
         _status = status;
+        _updates = updates;
+        _appControl = appControl;
         _dialogs = dialogs;
         _prompts = prompts;
     }
@@ -115,6 +138,8 @@ public partial class MainViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         SteamPath = _locator.LoadLastPath();
+        AppVersionText = _updates.CurrentVersionText;
+        _ = RefreshLatestUpdateAsync();
         await ExecuteBusyAsync("正在加载状态...", () => RefreshStateAsync());
     }
 
@@ -214,6 +239,86 @@ public partial class MainViewModel : ViewModelBase
             await Task.Run(() => _toml.EnsureLuaDirectory(SteamPath));
             _dialogs.OpenFolder(Path.Combine(SteamPath, "config", "lua"));
         });
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private async Task CheckForUpdatesAsync()
+        => await ExecuteBusyAsync("正在检查更新...", async () =>
+        {
+            var result = await _updates.CheckLatestAsync();
+            _latestUpdate = result;
+            ApplyUpdateResult(result);
+        });
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private async Task DownloadAndUpdateAsync()
+        => await ExecuteBusyAsync("正在下载并更新...", async () =>
+        {
+            var result = _latestUpdate ?? await _updates.CheckLatestAsync();
+            _latestUpdate = result;
+            ApplyUpdateResult(result);
+
+            if (!result.HasRelease || !result.IsUpdateAvailable)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(result.AssetDownloadUrl))
+            {
+                UpdateStateText = "失败";
+                UpdateDetailText = "该 Release 未提供可自动更新的 ZIP 发布包。";
+                UpdateSummaryText();
+                return;
+            }
+
+            UpdateStateText = "下载中";
+            UpdateDetailText = string.IsNullOrWhiteSpace(result.AssetName) ? result.ReleaseName : result.AssetName;
+            UpdateProgressText = string.Empty;
+            UpdateSummaryText();
+
+            var launched = false;
+            var progress = new Progress<UpdateProgress>(value =>
+            {
+                UpdateStateText = value.Stage;
+                UpdateProgressText = value.Percent > 0 ? $"{value.Percent}%" : string.Empty;
+                UpdateDetailText = value.Message;
+                UpdateSummaryText();
+            });
+
+            await _updates.StartSelfUpdateAsync(
+                result,
+                AppContext.BaseDirectory,
+                Environment.ProcessId,
+                progress);
+            launched = true;
+
+            UpdateStateText = "替换中";
+            UpdateProgressText = string.Empty;
+            UpdateDetailText = "更新器已启动，主程序退出后将自动替换并重启。";
+            UpdateSummaryText();
+
+            if (launched)
+            {
+                _appControl.Shutdown();
+            }
+        });
+
+    [RelayCommand]
+    private void OpenReleasePage()
+    {
+        var url = string.IsNullOrWhiteSpace(LatestReleaseUrl) ? _updates.ReleasesUrl : LatestReleaseUrl;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowWarning("OpenSteamTool 管理器", ex.Message);
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
     private void AddGame()
@@ -387,6 +492,66 @@ public partial class MainViewModel : ViewModelBase
             LogsText = sb.Length == 0 ? _status.BuildLogDiagnostic(SteamPath, module) : sb.ToString();
         });
 
+    private async Task RefreshLatestUpdateAsync()
+    {
+        var result = await _updates.CheckLatestAsync();
+        _latestUpdate = result;
+        ApplyUpdateResult(result);
+    }
+
+    private void ApplyUpdateResult(UpdateCheckResult result)
+    {
+        _latestUpdate = result;
+        LatestReleaseUrl = result.ReleasePageUrl;
+        AppVersionText = result.CurrentVersion.ToString(3);
+
+        if (result.ErrorMessage is not null)
+        {
+            UpdateStateText = result.HasRelease ? "检查失败" : "暂无公开 Release";
+            UpdateDetailText = result.ErrorMessage;
+            UpdateProgressText = string.Empty;
+            UpdateSummaryText();
+            return;
+        }
+
+        if (!result.HasRelease)
+        {
+            UpdateStateText = "暂无公开 Release";
+            UpdateDetailText = "仓库当前没有可用于自动更新的公开 Release。";
+            UpdateProgressText = string.Empty;
+            UpdateSummaryText();
+            return;
+        }
+
+        if (result.IsUpdateAvailable)
+        {
+            UpdateStateText = "可更新";
+            UpdateDetailText = BuildUpdateDetail(result);
+            UpdateProgressText = string.Empty;
+            UpdateSummaryText();
+            return;
+        }
+
+        UpdateStateText = "已是最新";
+        UpdateDetailText = BuildUpdateDetail(result);
+        UpdateProgressText = string.Empty;
+        UpdateSummaryText();
+    }
+
+    private static string BuildUpdateDetail(UpdateCheckResult result)
+    {
+        var versionText = result.LatestVersion?.ToString(3) ?? result.ReleaseTag;
+        var publishedText = result.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未知时间";
+        var detail = $"当前版本 {result.CurrentVersion.ToString(3)}，最新版本 {versionText}，发布于 {publishedText}";
+
+        if (!string.IsNullOrWhiteSpace(result.AssetName))
+        {
+            detail += $"，发布包 {result.AssetName}";
+        }
+
+        return detail;
+    }
+
     public async Task RefreshStateAsync(string? preserveAppId = null)
     {
         var currentPath = SteamPath;
@@ -508,7 +673,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateSummaryText()
     {
-        SummaryText = $"Steam {SteamStateText}，版本 {SteamVersionText}；DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配；DLL {DllLoadedStateText}；Lua {Games.Count} 个；TOML {TomlStateText}";
+        SummaryText = $"Steam {SteamStateText}，版本 {SteamVersionText}，DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配，Lua {Games.Count} 个，TOML {TomlStateText}";
     }
 
     private string FormatDllLoadedState(SteamInstallStatus status)
@@ -564,6 +729,9 @@ public partial class MainViewModel : ViewModelBase
         SaveTomlCommand.NotifyCanExecuteChanged();
         EnsureLuaDirCommand.NotifyCanExecuteChanged();
         OpenLuaFolderCommand.NotifyCanExecuteChanged();
+        CheckForUpdatesCommand.NotifyCanExecuteChanged();
+        DownloadAndUpdateCommand.NotifyCanExecuteChanged();
+        OpenReleasePageCommand.NotifyCanExecuteChanged();
         AddGameCommand.NotifyCanExecuteChanged();
         ImportGameCommand.NotifyCanExecuteChanged();
         SaveGameCommand.NotifyCanExecuteChanged();

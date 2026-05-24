@@ -59,7 +59,7 @@ public sealed class SteamInstallStatus
                     null => "无法判断"
                 };
             var version = string.IsNullOrWhiteSpace(SteamVersion) ? "未知" : SteamVersion;
-            return $"Steam {(IsSteamRunning ? "运行中" : "未运行")}，版本 {version}；DLL {installed}/{Dlls.Count} 已匹配；DLL {loaded}；Lua {Games.Count} 个；TOML {(TomlExists ? "存在" : "缺失")}";
+            return $"Steam {(IsSteamRunning ? "运行中" : "未运行")}, 版本 {version}, DLL {installed}/{Dlls.Count} 已匹配, Lua {Games.Count} 个, TOML {(TomlExists ? "存在" : "缺失")}";
         }
     }
 }

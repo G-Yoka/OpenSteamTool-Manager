@@ -344,6 +344,45 @@
                              HorizontalScrollBarVisibility="Auto" />
                 </DockPanel>
             </TabItem>
+            <TabItem Header="关于">
+                <ScrollViewer Margin="0,16,0,0">
+                    <StackPanel MaxWidth="860" HorizontalAlignment="Left">
+                        <TextBlock Text="OpenSteamTool 管理器" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock Text="一个用于管理 OpenSteamTool 安装、配置、Lua 游戏脚本和日志的轻量级 WPF 管理器。" Margin="0,8,0,18" Foreground="#4B5563" TextWrapping="Wrap" />
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="软件版本" Foreground="#6B7280" />
+                                <TextBlock Text="{Binding AppVersionText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding UpdateStateText, FallbackValue=''}" Margin="0,10,0,0" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding UpdateDetailText, FallbackValue=''}" Margin="0,4,0,0" Foreground="#4B5563" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding UpdateProgressText, FallbackValue=''}" Margin="0,4,0,0" Foreground="#B45309" />
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Content="检查更新" Command="{Binding CheckForUpdatesCommand}" />
+                                    <Button Content="下载并更新" Command="{Binding DownloadAndUpdateCommand}" />
+                                    <Button Content="打开发布页" Command="{Binding OpenReleasePageCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="项目信息" Foreground="#6B7280" />
+                                <TextBlock Text="仓库地址: https://github.com/G-Yoka/OpenSteamTool-Manager" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="发布页: https://github.com/G-Yoka/OpenSteamTool-Manager/releases" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="许可证: GPL-3.0-only" Margin="0,2,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="功能简介" Foreground="#6B7280" />
+                                <TextBlock Text="选择 Steam 根目录后，可查看 DLL 安装与哈希匹配状态、安装或移除内置 DLL、编辑 opensteamtool.toml、按 AppId 管理每游戏一个 Lua 文件、查看日志，以及直接在应用内下载、替换并重启到最新版本。" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>
