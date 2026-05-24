@@ -1,19 +1,21 @@
 # OpenSteamTool Manager
 
-OpenSteamTool Manager 是一个基于 `.NET 8 WPF` 的 Windows 桌面管理器，用于管理 Steam 根目录中的 OpenSteamTool 部署、配置、Lua 脚本和运行状态。
+OpenSteamTool Manager 是一个基于 `.NET 8 WPF` 的 Windows 桌面管理器，用于简化 OpenSteamTool 的部署、配置和状态查看。
+
+它不会修改 OpenSteamTool 的 C++ Hook 逻辑，只负责管理 Steam 根目录下的 DLL、`opensteamtool.toml`、Lua 配置文件和日志。
 
 ## 功能
 
-- 选择并校验 Steam 根目录。
-- 安装、移除和校验 `OpenSteamTool.dll`、`dwmapi.dll`、`xinput1_4.dll`。
-- 使用 SHA-256 对比 Payload DLL 与 Steam 目录 DLL。
-- 检查 `OpenSteamTool.dll` 是否已真实加载到 `steam.exe`。
-- 显示 Steam 客户端版本、DLL 状态、TOML 状态、Lua 状态和日志状态。
-- 编辑 `opensteamtool.toml`。
-- 按“每游戏一个 Lua 文件”管理 `<Steam>\config\lua\ost_<appid>.lua`。
-- 导入现有 Lua 文件并接管为管理器配置。
-- 查看 `<Steam>\opensteamtool\*.log` 日志。
-- 快速重启 Steam。
+- 选择并校验 Steam 根目录，要求目录中存在 `steam.exe`。
+- 安装或移除 OpenSteamTool 所需 DLL。
+- 安装前自动备份 Steam 根目录中已有的同名 DLL。
+- 移除时优先恢复备份；没有备份时只删除与内置 Payload 匹配的 DLL。
+- Steam 正在运行时禁止 DLL 安装/移除，但允许编辑 Lua 和 TOML。
+- 使用表单编辑 `opensteamtool.toml`。
+- 按“每个游戏一个文件”的方式管理 Lua 配置。
+- 支持启用/禁用单个游戏 Lua，禁用时改名为 `.lua.disabled`。
+- 查看 DLL、TOML、Lua、日志和 Steam 进程状态。
+- 读取 `<Steam>\opensteamtool\*.log`，支持按日志模块筛选。
 
 ## 项目结构
 
@@ -56,8 +58,6 @@ OpenSteamTool.Manager\Payload\
 - `OpenSteamTool.dll`
 - `dwmapi.dll`
 - `xinput1_4.dll`
-
-如果仓库不适合分发二进制 DLL，可以删除 Payload 中的 DLL，只保留 `Payload\README.md`，由使用者自行放入对应文件。
 
 ## 管理的 Steam 文件
 
