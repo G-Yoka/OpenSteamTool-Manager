@@ -344,6 +344,38 @@
                              HorizontalScrollBarVisibility="Auto" />
                 </DockPanel>
             </TabItem>
+
+            <TabItem Header="关于">
+                <ScrollViewer Margin="0,16,0,0">
+                    <StackPanel MaxWidth="860">
+                        <TextBlock Text="OpenSteamTool 管理器" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding AppVersionText, FallbackValue=''}" Margin="0,6,0,0" Foreground="#4B5563" />
+                        <TextBlock Text="OpenSteamTool Manager 是一个面向 Steam 目录的可视化管理器，用于管理 DLL 安装、TOML 配置、每游戏一个 Lua 文件、日志查看与状态检查。" 
+                                   Margin="0,14,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="#374151" />
+
+                        <GroupBox Header="项目与功能" Margin="0,18,0,0">
+                            <StackPanel Margin="12">
+                                <TextBlock Text="项目地址： https://github.com/G-Yoka/OpenSteamTool-Manager" TextWrapping="Wrap" />
+                                <TextBlock Text="发布页： 使用“检查更新”自动检测 GitHub Releases，或通过“打开发布页”进入最新版本页面。" TextWrapping="Wrap" Margin="0,6,0,0" />
+                                <TextBlock Text="主要功能：Steam 目录选择、DLL 安装/移除、TOML 编辑、Lua 导入与管理、日志查看、Steam 重启、版本检查。" TextWrapping="Wrap" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="更新" Margin="0,18,0,0">
+                            <StackPanel Margin="12">
+                                <TextBlock Text="{Binding UpdateStateText, FallbackValue='未检查'}" FontSize="18" FontWeight="SemiBold" Foreground="#2563EB" />
+                                <TextBlock Text="{Binding UpdateDetailText, FallbackValue=''}" Margin="0,6,0,0" Foreground="#4B5563" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Content="检查更新" Command="{Binding CheckForUpdatesCommand}" />
+                                    <Button Content="打开发布页" Command="{Binding OpenReleasePageCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>

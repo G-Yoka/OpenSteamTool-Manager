@@ -11,4 +11,6 @@ public interface IDialogService
     void ShowWarning(string title, string message);
 
     void OpenFolder(string path);
+
+    void OpenUrl(string url);
 }

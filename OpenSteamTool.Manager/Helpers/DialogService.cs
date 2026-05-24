@@ -54,6 +54,15 @@ public sealed class DialogService : IDialogService
         });
     }
 
+    public void OpenUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = url,
+            UseShellExecute = true
+        });
+    }
+
     private static Window? GetOwner()
         => System.Windows.Application.Current?.MainWindow;
 }
