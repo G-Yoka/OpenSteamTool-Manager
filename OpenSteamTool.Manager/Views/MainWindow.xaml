@@ -23,26 +23,19 @@
 
     <DockPanel Background="#F5F6F8">
         <Border DockPanel.Dock="Top" Background="White" BorderBrush="#D7DAE0" BorderThickness="0,0,0,1" Padding="18">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <StackPanel>
-                    <TextBlock Text="OpenSteamTool 管理器" FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SummaryText, FallbackValue=''}" Margin="0,6,0,0" Foreground="#4B5563" />
-                    <TextBlock Text="{Binding BusyMessage, FallbackValue=''}" Margin="0,2,0,0" Foreground="#B45309" />
-                    <DockPanel Margin="0,14,0,0">
-                        <Button DockPanel.Dock="Right" Content="选择 Steam 目录" Command="{Binding ChooseSteamPathCommand}" />
-                        <Button DockPanel.Dock="Right" Content="快速重启 Steam" Command="{Binding RestartSteamCommand}" />
-                        <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshCommand}" />
-                        <TextBox Text="{Binding SteamPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}"
-                                 VerticalContentAlignment="Center"
-                                 ToolTip="Steam 根目录，必须包含 steam.exe。" />
-                    </DockPanel>
-                </StackPanel>
-            </Grid>
+            <StackPanel>
+                <TextBlock Text="OpenSteamTool 管理器" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding SummaryText, FallbackValue=''}" Margin="0,6,0,0" Foreground="#4B5563" />
+                <TextBlock Text="{Binding BusyMessage, FallbackValue=''}" Margin="0,2,0,0" Foreground="#B45309" />
+                <DockPanel Margin="0,14,0,0">
+                    <Button DockPanel.Dock="Right" Content="选择 Steam 目录" Command="{Binding ChooseSteamPathCommand}" />
+                    <Button DockPanel.Dock="Right" Content="快速重启 Steam" Command="{Binding RestartSteamCommand}" />
+                    <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshCommand}" />
+                    <TextBox Text="{Binding SteamPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}"
+                             VerticalContentAlignment="Center"
+                             ToolTip="Steam 根目录，必须包含 steam.exe。" />
+                </DockPanel>
+            </StackPanel>
         </Border>
 
         <TabControl Margin="18">
@@ -54,56 +47,15 @@
                     </Grid.RowDefinitions>
 
                     <UniformGrid Columns="6" Margin="0,0,0,16">
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0">
-                            <StackPanel>
-                                <TextBlock Text="Steam" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding SteamStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0">
-                            <StackPanel>
-                                <TextBlock Text="Steam 版本" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding SteamVersionText, FallbackValue='未知'}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0">
-                            <StackPanel>
-                                <TextBlock Text="TOML" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding TomlStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0">
-                            <StackPanel>
-                                <TextBlock Text="Lua" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding LuaStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0">
-                            <StackPanel>
-                                <TextBlock Text="DLL 已加载" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding DllLoadedStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14">
-                            <StackPanel>
-                                <TextBlock Text="日志" Foreground="#6B7280" />
-                                <TextBlock Text="{Binding LogStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0"><StackPanel><TextBlock Text="Steam" Foreground="#6B7280" /><TextBlock Text="{Binding SteamStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0"><StackPanel><TextBlock Text="Steam 版本" Foreground="#6B7280" /><TextBlock Text="{Binding SteamVersionText, FallbackValue='未知'}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0"><StackPanel><TextBlock Text="TOML" Foreground="#6B7280" /><TextBlock Text="{Binding TomlStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0"><StackPanel><TextBlock Text="Lua" Foreground="#6B7280" /><TextBlock Text="{Binding LuaStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14" Margin="0,0,10,0"><StackPanel><TextBlock Text="DLL 已加载" Foreground="#6B7280" /><TextBlock Text="{Binding DllLoadedStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="14"><StackPanel><TextBlock Text="日志" Foreground="#6B7280" /><TextBlock Text="{Binding LogStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,0" /></StackPanel></Border>
                     </UniformGrid>
 
-                    <DataGrid Grid.Row="1"
-                              ItemsSource="{Binding DllStatuses, FallbackValue={x:Null}}"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              CanUserAddRows="False"
-                              HeadersVisibility="Column"
-                              Background="White"
-                              EnableRowVirtualization="True"
-                              EnableColumnVirtualization="True"
-                              VirtualizingPanel.IsVirtualizing="True"
-                              VirtualizingPanel.VirtualizationMode="Recycling"
-                              ScrollViewer.CanContentScroll="True">
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding DllStatuses, FallbackValue={x:Null}}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Background="White" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="DLL" Binding="{Binding Name, Mode=OneWay, FallbackValue=''}" Width="180" />
                             <DataGridTextColumn Header="状态" Binding="{Binding StateText, Mode=OneWay, FallbackValue=''}" Width="190" />
@@ -121,8 +73,7 @@
 
             <TabItem Header="DLL 安装">
                 <StackPanel Margin="0,16,0,0">
-                    <TextBlock Text="安装会把内置 Payload 里的三个 DLL 复制到 Steam 根目录。移除时优先恢复备份，没有备份时只删除与内置哈希一致的文件。"
-                               TextWrapping="Wrap" Foreground="#4B5563" />
+                    <TextBlock Text="安装会把内置 Payload 中的三个 DLL 复制到 Steam 根目录；移除时优先恢复备份。" TextWrapping="Wrap" Foreground="#4B5563" />
                     <StackPanel Orientation="Horizontal" Margin="0,18,0,14">
                         <Button Content="安装 DLL" Command="{Binding InstallDllsCommand}" />
                         <Button Content="移除 / 恢复" Command="{Binding RemoveDllsCommand}" />
@@ -150,39 +101,30 @@
                         </Grid.RowDefinitions>
 
                         <Label Grid.Row="0" Content="日志等级（Log Level）" />
-                        <ComboBox Grid.Row="0" Grid.Column="1"
-                                  SelectedValuePath="Tag"
-                                  SelectedValue="{Binding TomlLogLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=info}">
-                            <ComboBoxItem Content="跟踪（Trace）" Tag="trace" />
-                            <ComboBoxItem Content="调试（Debug）" Tag="debug" />
-                            <ComboBoxItem Content="信息（Info）" Tag="info" />
-                            <ComboBoxItem Content="警告（Warn）" Tag="warn" />
-                            <ComboBoxItem Content="错误（Error）" Tag="error" />
+                        <ComboBox Grid.Row="0" Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding TomlLogLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=info}">
+                            <ComboBoxItem Content="Trace" Tag="trace" />
+                            <ComboBoxItem Content="Debug" Tag="debug" />
+                            <ComboBoxItem Content="Info" Tag="info" />
+                            <ComboBoxItem Content="Warn" Tag="warn" />
+                            <ComboBoxItem Content="Error" Tag="error" />
                         </ComboBox>
 
                         <Label Grid.Row="1" Content="清单提供者（Manifest Provider）" />
-                        <ComboBox Grid.Row="1" Grid.Column="1"
-                                  SelectedValuePath="Tag"
-                                  SelectedValue="{Binding TomlManifestUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=wudrm}">
+                        <ComboBox Grid.Row="1" Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding TomlManifestUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=wudrm}">
                             <ComboBoxItem Content="Wudrm（默认）" Tag="wudrm" />
                             <ComboBoxItem Content="SteamRun" Tag="steamrun" />
                         </ComboBox>
 
                         <Label Grid.Row="2" Content="解析超时（ms）" />
-                        <TextBox Grid.Row="2" Grid.Column="1"
-                                 Text="{Binding TomlTimeoutResolveMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=5000, TargetNullValue=''}" />
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding TomlTimeoutResolveMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=5000, TargetNullValue=''}" />
                         <Label Grid.Row="3" Content="连接超时（ms）" />
-                        <TextBox Grid.Row="3" Grid.Column="1"
-                                 Text="{Binding TomlTimeoutConnectMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=5000, TargetNullValue=''}" />
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding TomlTimeoutConnectMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=5000, TargetNullValue=''}" />
                         <Label Grid.Row="4" Content="发送超时（ms）" />
-                        <TextBox Grid.Row="4" Grid.Column="1"
-                                 Text="{Binding TomlTimeoutSendMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=10000, TargetNullValue=''}" />
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TomlTimeoutSendMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=10000, TargetNullValue=''}" />
                         <Label Grid.Row="5" Content="接收超时（ms）" />
-                        <TextBox Grid.Row="5" Grid.Column="1"
-                                 Text="{Binding TomlTimeoutRecvMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=10000, TargetNullValue=''}" />
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TomlTimeoutRecvMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=10000, TargetNullValue=''}" />
                         <Label Grid.Row="6" Content="额外 Lua 路径" />
-                        <TextBox Grid.Row="6" Grid.Column="1" Height="96" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
-                                 Text="{Binding TomlLuaPathsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                        <TextBox Grid.Row="6" Grid.Column="1" Height="96" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding TomlLuaPathsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
 
                         <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
                             <Button Content="保存 TOML" Command="{Binding SaveTomlCommand}" />
@@ -209,17 +151,7 @@
                             <Button Content="打开 Lua 文件夹" Command="{Binding OpenLuaFolderCommand}" />
                         </WrapPanel>
 
-                        <DataGrid ItemsSource="{Binding Games, FallbackValue={x:Null}}"
-                                  SelectedItem="{Binding SelectedGame, Mode=TwoWay, FallbackValue={x:Null}}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  CanUserAddRows="False"
-                                  Background="White"
-                                  EnableRowVirtualization="True"
-                                  EnableColumnVirtualization="True"
-                                  VirtualizingPanel.IsVirtualizing="True"
-                                  VirtualizingPanel.VirtualizationMode="Recycling"
-                                  ScrollViewer.CanContentScroll="True">
+                        <DataGrid ItemsSource="{Binding Games, FallbackValue={x:Null}}" SelectedItem="{Binding SelectedGame, Mode=TwoWay, FallbackValue={x:Null}}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Background="White" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="AppId" Binding="{Binding AppId, Mode=OneWay, FallbackValue=''}" Width="120" />
                                 <DataGridTextColumn Header="备注" Binding="{Binding Note, Mode=OneWay, FallbackValue=''}" Width="170" />
@@ -249,26 +181,19 @@
                             </Grid.RowDefinitions>
 
                             <Label Grid.Row="0" Content="AppId" />
-                            <TextBox Grid.Row="0" Grid.Column="1"
-                                     Text="{Binding SelectedGame.AppId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedGame.AppId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
                             <Label Grid.Row="1" Content="备注" />
-                            <TextBox Grid.Row="1" Grid.Column="1"
-                                     Text="{Binding SelectedGame.Note, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedGame.Note, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
                             <Label Grid.Row="2" Content="启用" />
-                            <CheckBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,10"
-                                      IsChecked="{Binding SelectedGame.Enabled, Mode=TwoWay, FallbackValue=False}" />
+                            <CheckBox Grid.Row="2" Grid.Column="1" Margin="0,4,0,10" IsChecked="{Binding SelectedGame.Enabled, Mode=TwoWay, FallbackValue=False}" />
                             <Label Grid.Row="3" Content="访问令牌（Access Token）" />
-                            <TextBox Grid.Row="3" Grid.Column="1"
-                                     Text="{Binding SelectedGame.AccessToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedGame.AccessToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
                             <Label Grid.Row="4" Content="统计 SteamID（Stats SteamID）" />
-                            <TextBox Grid.Row="4" Grid.Column="1"
-                                     Text="{Binding SelectedGame.StatSteamId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding SelectedGame.StatSteamId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
                             <Label Grid.Row="5" Content="AppTicket 十六进制" />
-                            <TextBox Grid.Row="5" Grid.Column="1"
-                                     Text="{Binding SelectedGame.AppTicketHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding SelectedGame.AppTicketHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
                             <Label Grid.Row="6" Content="ETicket 十六进制" />
-                            <TextBox Grid.Row="6" Grid.Column="1"
-                                     Text="{Binding SelectedGame.ETicketHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
+                            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding SelectedGame.ETicketHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" />
 
                             <GroupBox Grid.Row="7" Grid.ColumnSpan="2" Header="Depot 与解密密钥（Depots / Decryption Keys）" Margin="0,6,0,10">
                                 <DockPanel>
@@ -276,15 +201,7 @@
                                         <Button Content="添加 Depot" Command="{Binding AddDepotCommand}" />
                                         <Button Content="删除选中" Command="{Binding RemoveDepotCommand}" />
                                     </StackPanel>
-                                    <DataGrid ItemsSource="{Binding SelectedGame.Depots, FallbackValue={x:Null}}"
-                                              SelectedItem="{Binding SelectedDepot, Mode=TwoWay, FallbackValue={x:Null}}"
-                                              AutoGenerateColumns="False"
-                                              CanUserAddRows="True"
-                                              Margin="8,0,8,8"
-                                              EnableRowVirtualization="True"
-                                              VirtualizingPanel.IsVirtualizing="True"
-                                              VirtualizingPanel.VirtualizationMode="Recycling"
-                                              ScrollViewer.CanContentScroll="True">
+                                    <DataGrid ItemsSource="{Binding SelectedGame.Depots, FallbackValue={x:Null}}" SelectedItem="{Binding SelectedDepot, Mode=TwoWay, FallbackValue={x:Null}}" AutoGenerateColumns="False" CanUserAddRows="True" Margin="8,0,8,8" EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="DepotId" Binding="{Binding DepotId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" Width="150" />
                                             <DataGridTextColumn Header="解密密钥" Binding="{Binding DecryptionKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" Width="*" />
@@ -299,15 +216,7 @@
                                         <Button Content="添加清单项" Command="{Binding AddManifestCommand}" />
                                         <Button Content="删除选中" Command="{Binding RemoveManifestCommand}" />
                                     </StackPanel>
-                                    <DataGrid ItemsSource="{Binding SelectedGame.ManifestOverrides, FallbackValue={x:Null}}"
-                                              SelectedItem="{Binding SelectedManifest, Mode=TwoWay, FallbackValue={x:Null}}"
-                                              AutoGenerateColumns="False"
-                                              CanUserAddRows="True"
-                                              Margin="8,0,8,8"
-                                              EnableRowVirtualization="True"
-                                              VirtualizingPanel.IsVirtualizing="True"
-                                              VirtualizingPanel.VirtualizationMode="Recycling"
-                                              ScrollViewer.CanContentScroll="True">
+                                    <DataGrid ItemsSource="{Binding SelectedGame.ManifestOverrides, FallbackValue={x:Null}}" SelectedItem="{Binding SelectedManifest, Mode=TwoWay, FallbackValue={x:Null}}" AutoGenerateColumns="False" CanUserAddRows="True" Margin="8,0,8,8" EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="DepotId" Binding="{Binding DepotId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" Width="150" />
                                             <DataGridTextColumn Header="GID" Binding="{Binding Gid, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" Width="260" />
@@ -318,12 +227,62 @@
                             </GroupBox>
 
                             <GroupBox Grid.Row="9" Grid.ColumnSpan="2" Header="自定义 Lua">
-                                <TextBox Text="{Binding SelectedGame.CustomLua, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}"
-                                         AcceptsReturn="True"
-                                         VerticalScrollBarVisibility="Auto"
-                                         FontFamily="Consolas" />
+                                <TextBox Text="{Binding SelectedGame.CustomLua, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" />
                             </GroupBox>
                         </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="游戏资源">
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="360" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <DockPanel>
+                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <Button Content="刷新游戏" Command="{Binding RefreshGameResourcesCommand}" />
+                            <Button Content="打开游戏目录" Command="{Binding OpenGameDirectoryCommand}" />
+                            <Button Content="打开目标目录" Command="{Binding OpenGameTargetDirectoryCommand}" />
+                            <Button Content="回滚上次安装" Command="{Binding RollbackGamePackageCommand}" />
+                        </WrapPanel>
+
+                        <DataGrid ItemsSource="{Binding SteamGames, FallbackValue={x:Null}}" SelectedItem="{Binding SelectedSteamGame, Mode=TwoWay, FallbackValue={x:Null}}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Background="White" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="AppId" Binding="{Binding AppId, Mode=OneWay, FallbackValue=''}" Width="120" />
+                                <DataGridTextColumn Header="名称" Binding="{Binding Name, Mode=OneWay, FallbackValue=''}" Width="*" />
+                                <DataGridTextColumn Header="安装目录" Binding="{Binding InstallPath, Mode=OneWay, FallbackValue=''}" Width="190" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Column="2">
+                        <StackPanel>
+                            <TextBlock Text="{Binding GameResourceStateText, FallbackValue=''}" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding GameResourceDetailText, FallbackValue=''}" Margin="0,4,0,10" Foreground="#4B5563" TextWrapping="Wrap" />
+
+                            <DataGrid ItemsSource="{Binding GamePackages, FallbackValue={x:Null}}" SelectedItem="{Binding SelectedGamePackage, Mode=TwoWay, FallbackValue={x:Null}}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Background="White" Height="260" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="名称" Binding="{Binding Name, Mode=OneWay, FallbackValue=''}" Width="180" />
+                                    <DataGridTextColumn Header="说明" Binding="{Binding Description, Mode=OneWay, FallbackValue=''}" Width="*" />
+                                    <DataGridTextColumn Header="目标路径" Binding="{Binding TargetRelativePath, Mode=OneWay, FallbackValue=''}" Width="180" />
+                                    <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled, Mode=OneWay, FallbackValue=False}" Width="70" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="12" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding GameResourceProgressText, FallbackValue=''}" Foreground="#B45309" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                        <Button Content="安装" Command="{Binding InstallGamePackageCommand}" />
+                                        <Button Content="打开安装目录" Command="{Binding OpenGameTargetDirectoryCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </ScrollViewer>
                 </Grid>
             </TabItem>
@@ -331,24 +290,18 @@
             <TabItem Header="日志">
                 <DockPanel Margin="0,16,0,0">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBox Width="260" VerticalContentAlignment="Center"
-                                 Text="{Binding LogModuleFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}"
-                                 ToolTip="输入文件名关键字，例如 main、ipc、manifest。留空则读取所有日志。" />
+                        <TextBox Width="260" VerticalContentAlignment="Center" Text="{Binding LogModuleFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue='', TargetNullValue=''}" ToolTip="输入文件名关键字，例如 main、ipc、manifest。留空则读取全部日志。" />
                         <Button Content="读取日志" Command="{Binding LoadLogsCommand}" />
                     </StackPanel>
-                    <TextBox Text="{Binding LogsText, Mode=TwoWay, FallbackValue='', TargetNullValue=''}"
-                             FontFamily="Consolas"
-                             IsReadOnly="True"
-                             TextWrapping="NoWrap"
-                             VerticalScrollBarVisibility="Auto"
-                             HorizontalScrollBarVisibility="Auto" />
+                    <TextBox Text="{Binding LogsText, Mode=TwoWay, FallbackValue='', TargetNullValue=''}" FontFamily="Consolas" IsReadOnly="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
                 </DockPanel>
             </TabItem>
+
             <TabItem Header="关于">
                 <ScrollViewer Margin="0,16,0,0">
                     <StackPanel MaxWidth="860" HorizontalAlignment="Left">
                         <TextBlock Text="OpenSteamTool 管理器" FontSize="24" FontWeight="SemiBold" />
-                        <TextBlock Text="一个用于管理 OpenSteamTool 安装、配置、Lua 游戏脚本和日志的轻量级 WPF 管理器。" Margin="0,8,0,18" Foreground="#4B5563" TextWrapping="Wrap" />
+                        <TextBlock Text="一个用于管理 OpenSteamTool 安装、配置、Lua 游戏脚本、日志、游戏资源和自更新的轻量 WPF 工具。" Margin="0,8,0,18" Foreground="#4B5563" TextWrapping="Wrap" />
 
                         <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
                             <StackPanel>
@@ -377,7 +330,7 @@
                         <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16">
                             <StackPanel>
                                 <TextBlock Text="功能简介" Foreground="#6B7280" />
-                                <TextBlock Text="选择 Steam 根目录后，可查看 DLL 安装与哈希匹配状态、安装或移除内置 DLL、编辑 opensteamtool.toml、按 AppId 管理每游戏一个 Lua 文件、查看日志，以及直接在应用内下载、替换并重启到最新版本。" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="可选择 Steam 根目录并检查 DLL 安装与加载状态；安装或移除内置 DLL；编辑 opensteamtool.toml；按 AppId 管理 Lua；查看日志；管理游戏资源包；并在应用内下载更新。" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

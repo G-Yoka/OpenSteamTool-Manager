@@ -46,10 +46,10 @@ public sealed class DialogService : IDialogService
 
     public void OpenFolder(string path)
     {
+        var fullPath = Path.GetFullPath(path);
         Process.Start(new ProcessStartInfo
         {
-            FileName = "explorer.exe",
-            Arguments = $"\"{path}\"",
+            FileName = fullPath,
             UseShellExecute = true
         });
     }

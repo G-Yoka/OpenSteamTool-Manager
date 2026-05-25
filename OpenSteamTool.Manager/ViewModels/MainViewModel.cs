@@ -19,13 +19,19 @@ public partial class MainViewModel : ViewModelBase
     private readonly LuaGameConfigService _lua;
     private readonly StatusService _status;
     private readonly UpdateService _updates;
+    private readonly SteamGameLibraryService _steamGames;
+    private readonly GitHubGamePackageService _gamePackages;
+    private readonly GamePackageInstallService _gameInstaller;
     private readonly IAppControlService _appControl;
     private readonly IDialogService _dialogs;
     private readonly ITextPromptService _prompts;
     private UpdateCheckResult? _latestUpdate;
+    private bool _loadingGameResources;
 
     public ObservableCollection<DllInstallStatus> DllStatuses { get; } = new();
     public ObservableCollection<GameLuaConfig> Games { get; } = new();
+    public ObservableCollection<SteamGameInfo> SteamGames { get; } = new();
+    public ObservableCollection<GitHubGamePackage> GamePackages { get; } = new();
 
     [ObservableProperty]
     private string steamPath = string.Empty;
@@ -76,6 +82,15 @@ public partial class MainViewModel : ViewModelBase
     private string logModuleFilter = string.Empty;
 
     [ObservableProperty]
+    private string gameResourceStateText = "unloaded";
+
+    [ObservableProperty]
+    private string gameResourceDetailText = string.Empty;
+
+    [ObservableProperty]
+    private string gameResourceProgressText = string.Empty;
+
+    [ObservableProperty]
     private string tomlLogLevel = "info";
 
     [ObservableProperty]
@@ -104,6 +119,16 @@ public partial class MainViewModel : ViewModelBase
     private GameLuaConfig? selectedGame;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenGameDirectoryCommand))]
+    private SteamGameInfo? selectedSteamGame;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallGamePackageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RollbackGamePackageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OpenGameTargetDirectoryCommand))]
+    private GitHubGamePackage? selectedGamePackage;
+
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RemoveDepotCommand))]
     private DepotConfig? selectedDepot;
 
@@ -119,6 +144,9 @@ public partial class MainViewModel : ViewModelBase
         LuaGameConfigService lua,
         StatusService status,
         UpdateService updates,
+        SteamGameLibraryService steamGames,
+        GitHubGamePackageService gamePackages,
+        GamePackageInstallService gameInstaller,
         IAppControlService appControl,
         IDialogService dialogs,
         ITextPromptService prompts)
@@ -130,6 +158,9 @@ public partial class MainViewModel : ViewModelBase
         _lua = lua;
         _status = status;
         _updates = updates;
+        _steamGames = steamGames;
+        _gamePackages = gamePackages;
+        _gameInstaller = gameInstaller;
         _appControl = appControl;
         _dialogs = dialogs;
         _prompts = prompts;
@@ -141,6 +172,7 @@ public partial class MainViewModel : ViewModelBase
         AppVersionText = _updates.CurrentVersionText;
         _ = RefreshLatestUpdateAsync();
         await ExecuteBusyAsync("正在加载状态...", () => RefreshStateAsync());
+        await RefreshGameResourcesAsyncCore(false);
     }
 
     [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
@@ -319,6 +351,101 @@ public partial class MainViewModel : ViewModelBase
             _dialogs.ShowWarning("OpenSteamTool 管理器", ex.Message);
         }
     }
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private async Task RefreshGameResourcesAsync()
+        => await ExecuteBusyAsync("Refreshing game resources...", async () => await RefreshGameResourcesAsyncCore(true));
+
+    [RelayCommand(CanExecute = nameof(CanModifySelectedSteamGame))]
+    private void OpenGameDirectory()
+    {
+        if (SelectedSteamGame is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _dialogs.OpenFolder(Path.GetFullPath(SelectedSteamGame.InstallPath));
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowWarning("OpenSteamTool 管理器", ex.Message);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanModifySelectedSteamGame))]
+    private void OpenGameTargetDirectory()
+    {
+        if (SelectedSteamGame is null)
+        {
+            return;
+        }
+
+        var target = SelectedGamePackage is null
+            ? SelectedSteamGame.InstallPath
+            : _gameInstaller.GetTargetDirectory(SelectedSteamGame, SelectedGamePackage);
+
+        try
+        {
+            var fullTarget = Path.GetFullPath(target);
+            Directory.CreateDirectory(fullTarget);
+            _dialogs.OpenFolder(fullTarget);
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowWarning("OpenSteamTool 管理器", ex.Message);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanModifySelectedGamePackage))]
+    private async Task InstallGamePackageAsync()
+        => await ExecuteBusyAsync("Installing game resource...", async () =>
+        {
+            if (SelectedSteamGame is null || SelectedGamePackage is null)
+            {
+                return;
+            }
+
+            if (!EnsureValidSteamPath())
+            {
+                return;
+            }
+
+            var progress = new Progress<UpdateProgress>(value =>
+            {
+                GameResourceStateText = value.Stage;
+                GameResourceProgressText = value.Percent > 0 ? $"{value.Percent}%" : string.Empty;
+                GameResourceDetailText = value.Message;
+            });
+
+            var record = await _gameInstaller.InstallAsync(SteamPath, SelectedSteamGame, SelectedGamePackage, _gamePackages.ManifestUrl, progress);
+            GameResourceStateText = "installed";
+            GameResourceProgressText = string.Empty;
+            GameResourceDetailText = $"{record.PackageName} installed.";
+            await RefreshGameResourcesAsyncCore(false, SelectedSteamGame.AppId);
+        });
+
+    [RelayCommand(CanExecute = nameof(CanModifySelectedSteamGame))]
+    private async Task RollbackGamePackageAsync()
+        => await ExecuteBusyAsync("Rolling back game resource...", async () =>
+        {
+            if (SelectedSteamGame is null)
+            {
+                return;
+            }
+
+            if (!EnsureValidSteamPath())
+            {
+                return;
+            }
+
+            var record = await _gameInstaller.RollbackLatestAsync(SteamPath, SelectedSteamGame);
+            GameResourceStateText = "rolled back";
+            GameResourceProgressText = string.Empty;
+            GameResourceDetailText = $"{record.PackageName} rolled back.";
+            await RefreshGameResourcesAsyncCore(false, SelectedSteamGame.AppId);
+        });
 
     [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
     private void AddGame()
@@ -595,6 +722,116 @@ public partial class MainViewModel : ViewModelBase
         UpdateSummaryText();
     }
 
+    private async Task RefreshGameResourcesAsyncCore(bool forceManifestRefresh, string? preserveAppId = null)
+    {
+        _loadingGameResources = true;
+        try
+        {
+            if (!_locator.IsValidSteamPath(SteamPath))
+            {
+                SteamGames.Clear();
+                GamePackages.Clear();
+                SelectedSteamGame = null;
+                SelectedGamePackage = null;
+                GameResourceStateText = "invalid steam path";
+                GameResourceDetailText = string.Empty;
+                GameResourceProgressText = string.Empty;
+                return;
+            }
+
+            _locator.SaveLastPath(SteamPath);
+            var games = await Task.Run(() => _steamGames.ScanInstalledGames(SteamPath));
+            SteamGames.Clear();
+            foreach (var game in games)
+            {
+                SteamGames.Add(game);
+            }
+
+            var selectedAppId = preserveAppId ?? SelectedSteamGame?.AppId;
+            SelectedSteamGame = string.IsNullOrWhiteSpace(selectedAppId)
+                ? SteamGames.FirstOrDefault()
+                : SteamGames.FirstOrDefault(game => game.AppId == selectedAppId) ?? SteamGames.FirstOrDefault();
+
+            if (SelectedSteamGame is null)
+            {
+                GamePackages.Clear();
+                SelectedGamePackage = null;
+                GameResourceStateText = "no installed games";
+                GameResourceDetailText = string.Empty;
+                GameResourceProgressText = string.Empty;
+                return;
+            }
+
+            await LoadPackagesForSelectedSteamGameAsync(forceManifestRefresh, SelectedSteamGame.AppId);
+        }
+        catch (Exception ex)
+        {
+            GamePackages.Clear();
+            SelectedGamePackage = null;
+            GameResourceStateText = "load failed";
+            GameResourceDetailText = ex.Message;
+            GameResourceProgressText = string.Empty;
+        }
+        finally
+        {
+            _loadingGameResources = false;
+            NotifyCommandStates();
+        }
+    }
+
+    private async Task LoadPackagesForSelectedSteamGameAsync(bool forceManifestRefresh, string? appId = null)
+    {
+        var currentAppId = appId ?? SelectedSteamGame?.AppId;
+        if (string.IsNullOrWhiteSpace(currentAppId))
+        {
+            GamePackages.Clear();
+            SelectedGamePackage = null;
+            GameResourceStateText = "no game selected";
+            GameResourceDetailText = string.Empty;
+            GameResourceProgressText = string.Empty;
+            return;
+        }
+
+        try
+        {
+            var packages = await _gamePackages.LoadPackagesForAppIdAsync(currentAppId, forceManifestRefresh);
+            var previousZipUrl = SelectedGamePackage?.ZipUrl;
+
+            GamePackages.Clear();
+            foreach (var package in packages)
+            {
+                GamePackages.Add(package);
+            }
+
+            SelectedGamePackage = !string.IsNullOrWhiteSpace(previousZipUrl)
+                ? GamePackages.FirstOrDefault(item => string.Equals(item.ZipUrl, previousZipUrl, StringComparison.OrdinalIgnoreCase))
+                : null;
+
+            if (SelectedGamePackage is null)
+            {
+                SelectedGamePackage = GamePackages.FirstOrDefault();
+            }
+
+            GameResourceStateText = GamePackages.Count == 0 ? "no resources" : $"{GamePackages.Count} resources";
+            GameResourceDetailText = SelectedSteamGame is null
+                ? string.Empty
+                : $"{SelectedSteamGame.Name} ({SelectedSteamGame.AppId})";
+            GameResourceProgressText = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            GamePackages.Clear();
+            SelectedGamePackage = null;
+            GameResourceStateText = "load failed";
+            GameResourceDetailText = ex.Message;
+            GameResourceProgressText = string.Empty;
+        }
+        finally
+        {
+            NotifyCommandStates();
+        }
+    }
+
     private void LoadTomlToFields(TomlSettings settings)
     {
         TomlLogLevel = settings.LogLevel;
@@ -671,6 +908,12 @@ public partial class MainViewModel : ViewModelBase
     private bool CanModifySelectedManifest()
         => !IsBusy && SelectedGame is not null && SelectedManifest is not null;
 
+    private bool CanModifySelectedSteamGame()
+        => !IsBusy && SelectedSteamGame is not null;
+
+    private bool CanModifySelectedGamePackage()
+        => !IsBusy && SelectedSteamGame is not null && SelectedGamePackage is not null;
+
     private void UpdateSummaryText()
     {
         SummaryText = $"Steam {SteamStateText}，版本 {SteamVersionText}，DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配，Lua {Games.Count} 个，TOML {TomlStateText}";
@@ -719,6 +962,22 @@ public partial class MainViewModel : ViewModelBase
     partial void OnSelectedManifestChanged(ManifestOverrideConfig? value)
         => NotifyCommandStates();
 
+    partial void OnSelectedSteamGameChanged(SteamGameInfo? value)
+    {
+        SelectedGamePackage = null;
+        NotifyCommandStates();
+
+        if (_loadingGameResources || value is null)
+        {
+            return;
+        }
+
+        _ = LoadPackagesForSelectedSteamGameAsync(false, value.AppId);
+    }
+
+    partial void OnSelectedGamePackageChanged(GitHubGamePackage? value)
+        => NotifyCommandStates();
+
     private void NotifyCommandStates()
     {
         ChooseSteamPathCommand.NotifyCanExecuteChanged();
@@ -741,6 +1000,11 @@ public partial class MainViewModel : ViewModelBase
         AddManifestCommand.NotifyCanExecuteChanged();
         RemoveManifestCommand.NotifyCanExecuteChanged();
         LoadLogsCommand.NotifyCanExecuteChanged();
+        RefreshGameResourcesCommand.NotifyCanExecuteChanged();
+        OpenGameDirectoryCommand.NotifyCanExecuteChanged();
+        OpenGameTargetDirectoryCommand.NotifyCanExecuteChanged();
+        InstallGamePackageCommand.NotifyCanExecuteChanged();
+        RollbackGamePackageCommand.NotifyCanExecuteChanged();
     }
 
     private static int ParsePositiveInt(string value, string name)
