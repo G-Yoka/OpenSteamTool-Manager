@@ -10,6 +10,7 @@ public sealed class UpdateCheckResult
     public string ReleasePageUrl { get; init; } = string.Empty;
     public string AssetName { get; init; } = string.Empty;
     public string AssetDownloadUrl { get; init; } = string.Empty;
+    public string AssetMirrorUrl { get; init; } = string.Empty;
     public bool HasRelease { get; init; }
     public bool IsUpdateAvailable { get; init; }
     public string? ErrorMessage { get; init; }

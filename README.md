@@ -1,32 +1,51 @@
 # OpenSteamTool Manager
 
-OpenSteamTool Manager 是一个基于 `.NET 8 WPF` 的 Windows 桌面管理器，用于管理 Steam 根目录中的 OpenSteamTool 相关文件、Lua 配置、游戏资源和更新流程。
+OpenSteamTool Manager 是一个基于 `.NET 8 WPF` 的 Windows 桌面管理器，用来管理 Steam 根目录中的 OpenSteamTool 相关文件、Lua 配置、日志、游戏资源包，以及应用自身更新。
 
-## 功能
+当前版本：`v0.1.4`
+
+## 主要功能
 
 - 选择并校验 Steam 根目录
 - 安装、移除并校验 `OpenSteamTool.dll`、`dwmapi.dll`、`xinput1_4.dll`
-- 使用 SHA-256 对比 Payload DLL 与 Steam 目录中的 DLL
-- 检查 `OpenSteamTool.dll` 是否已加载到 `steam.exe`
-- 显示 Steam 运行状态、版本、DLL 状态、TOML 状态、Lua 状态、日志状态
+- 通过 SHA-256 校验 Payload 与 Steam 目录中的 DLL 是否一致
+- 检查 `OpenSteamTool.dll` 是否已真正加载进 `steam.exe`
 - 编辑 `opensteamtool.toml`
-- 按每游戏一个 Lua 文件管理 `ost_<appid>.lua`
-- 导入现有 Lua 文件并接管为管理器配置
+- 按每个游戏一个 Lua 文件管理 `ost_<appid>.lua`
+- 导入现有 Lua 文件并接管到管理器
 - 查看 `Steam\opensteamtool\*.log`
 - 快速重启 Steam
-- 检查 GitHub Releases 更新
-- 下载并应用管理器更新
-- 按 Steam AppId 从 GitHub 资源仓库下载安装游戏资源
+- 检查更新并在应用内完成更新
+- 按 Steam AppId 从 GitHub 游戏资源仓库下载并安装资源
 
-## GitHub 令牌
+## CDN 更新
 
-如果更新检查或资源下载出现 `403 rate limit exceeded`，可以在程序的“关于”页里配置 GitHub Personal Access Token（PAT）。
+为减少 GitHub 网络问题带来的影响，更新与资源下载优先走 jsDelivr CDN：
 
-- 令牌仅保存在本机当前 Windows 用户配置中，并使用系统加密保护
-- 令牌不会写入仓库、日志或安装记录
-- 对公开仓库，通常只需要最小权限的 PAT 即可
+- 更新检查优先读取 `cdn/update.json`
+- 更新包优先从 `releases/` 目录的 CDN 地址下载
+- 游戏资源清单优先读取 `GameResources` 仓库的 CDN 地址
+- CDN 不可用时自动回退到 GitHub 原始地址或 Releases 兜底
 
-## 项目结构
+如果要发布一个可被 CDN 直接读取的更新包，请同步更新：
+
+- `cdn/update.json`
+- `releases/OpenSteamTool.Manager-vX.Y.Z.zip`
+
+## 构建
+
+```powershell
+dotnet restore OpenSteamTool.Manager\OpenSteamTool.Manager.csproj
+dotnet build OpenSteamTool.Manager\OpenSteamTool.Manager.csproj -c Release
+```
+
+构建输出位于：
+
+```text
+OpenSteamTool.Manager\bin\Release\net8.0-windows\
+```
+
+## 目录结构
 
 ```text
 OpenSteamTool.Manager/
@@ -37,55 +56,10 @@ OpenSteamTool.Manager/
   Helpers/
   Converters/
   Payload/
+  cdn/
+  releases/
 ```
-
-当前保持单项目结构，不拆分类库。WPF 界面使用 MVVM 组织，核心第三方依赖仅为 `CommunityToolkit.Mvvm`。
-
-## 构建
-
-```powershell
-dotnet restore OpenSteamTool.Manager\OpenSteamTool.Manager.csproj
-dotnet build OpenSteamTool.Manager\OpenSteamTool.Manager.csproj -c Release
-```
-
-构建产物位于：
-
-```text
-OpenSteamTool.Manager\bin\Release\net8.0-windows\
-```
-
-## Payload DLL
-
-应用安装 DLL 时会读取：
-
-```text
-OpenSteamTool.Manager\Payload\
-```
-
-需要包含：
-
-- `OpenSteamTool.dll`
-- `dwmapi.dll`
-- `xinput1_4.dll`
-
-## 管理的 Steam 文件
-
-- `Steam\OpenSteamTool.dll`
-- `Steam\dwmapi.dll`
-- `Steam\xinput1_4.dll`
-- `Steam\opensteamtool.toml`
-- `Steam\config\lua\ost_<appid>.lua`
-- `Steam\opensteamtool\*.log`
 
 ## 许可证
 
-本仓库采用 GNU General Public License v3.0，详见 [LICENSE](LICENSE)。
-
-本项目包含并分发与 OpenSteamTool 相关的 DLL 资源，OpenSteamTool 上游项目为 [OpenSteam001/OpenSteamTool](https://github.com/OpenSteam001/OpenSteamTool)，其许可证为 GPL-3.0。第三方来源、二进制 Payload 和对应说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## 说明
-
-- 安装或移除 DLL 前需要关闭 Steam。
-- Lua 和 TOML 可以在 Steam 运行时编辑，但部分配置需要重启 Steam 后才会重新加载。
-- “DLL 已加载”状态来自 `steam.exe` 当前模块列表，不等同于文件是否存在。
-- “Steam 版本”优先读取 `Steam\logs\connection_log.txt` 中最新的 `Client version`。
+本仓库采用 `GPL-3.0-only` 许可证。OpenSteamTool 相关上游项目同样遵循 GPL-3.0，第三方资源与说明见 `THIRD_PARTY_NOTICES.md`。

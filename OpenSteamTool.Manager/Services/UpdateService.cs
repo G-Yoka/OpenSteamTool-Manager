@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenSteamTool.Manager.Helpers;
 using OpenSteamTool.Manager.Models;
 
 namespace OpenSteamTool.Manager.Services;
@@ -18,21 +19,139 @@ public sealed class UpdateService
     };
 
     private readonly GitHubHttpService github;
+    private readonly CdnService cdn;
     private readonly Version currentVersion;
 
-    public UpdateService(GitHubHttpService github)
+    public UpdateService(GitHubHttpService github, CdnService cdn)
     {
         this.github = github;
+        this.cdn = cdn;
         currentVersion = ReadCurrentVersion();
     }
 
     public string CurrentVersionText => currentVersion.ToString(3);
 
-    public string RepositoryUrl => "https://github.com/G-Yoka/OpenSteamTool-Manager";
+    public string RepositoryUrl => cdn.ManagerRepositoryUrl;
 
-    public string ReleasesUrl => $"{RepositoryUrl}/releases";
+    public string ReleasesUrl => cdn.ManagerReleasesUrl;
 
     public async Task<UpdateCheckResult> CheckLatestAsync(CancellationToken cancellationToken = default)
+    {
+        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
+        if (cdnResult is not null)
+        {
+            return cdnResult;
+        }
+
+        return await CheckLatestFromGitHubAsync(cancellationToken);
+    }
+
+    public async Task StartSelfUpdateAsync(
+        UpdateCheckResult release,
+        string installDirectory,
+        int processId,
+        IProgress<UpdateProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!release.HasRelease)
+        {
+            throw new InvalidOperationException("No public release is available for auto update.");
+        }
+
+        if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
+        {
+            throw new InvalidOperationException("This release does not provide a downloadable ZIP asset.");
+        }
+
+        var workDir = Path.Combine(Path.GetTempPath(), "OpenSteamTool.Manager", "update", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
+        var downloadDir = Path.Combine(workDir, "download");
+        var extractDir = Path.Combine(workDir, "extract");
+        Directory.CreateDirectory(downloadDir);
+        Directory.CreateDirectory(extractDir);
+
+        var zipName = string.IsNullOrWhiteSpace(release.AssetName) ? "OpenSteamTool.Manager-update.zip" : release.AssetName;
+        var zipPath = Path.Combine(downloadDir, zipName);
+        var sourceRoot = await DownloadAssetWithFallbackAsync(release.AssetDownloadUrl, release.AssetMirrorUrl, zipPath, progress, cancellationToken);
+
+        progress?.Report(new UpdateProgress { Stage = "Extracting", Percent = 0, Message = "Preparing update files..." });
+        ZipFile.ExtractToDirectory(sourceRoot, extractDir, overwriteFiles: true);
+
+        var payloadRoot = ResolvePayloadRoot(extractDir);
+        var exeName = Path.GetFileName(Environment.ProcessPath ?? "OpenSteamTool.Manager.exe");
+        var updateScript = Path.Combine(workDir, "apply-update.ps1");
+
+        await File.WriteAllTextAsync(updateScript, BuildScript(), new UTF8Encoding(false), cancellationToken);
+        StartHelperProcess(updateScript, payloadRoot, installDirectory, exeName, processId);
+        progress?.Report(new UpdateProgress { Stage = "Replacing", Percent = 100, Message = "Update helper started; the app will replace files and restart after exit." });
+    }
+
+    private async Task<UpdateCheckResult?> TryLoadLatestFromCdnAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = github.CreateRequest(HttpMethod.Get, cdn.ManagerUpdateMetadataUrl, "application/json", includeGitHubHeaders: false);
+            using var response = await github.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var metadata = await JsonSerializer.DeserializeAsync<CdnUpdateMetadata>(stream, JsonOptions, cancellationToken);
+            if (metadata is null)
+            {
+                return null;
+            }
+
+            return BuildResultFromMetadata(metadata);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private UpdateCheckResult? BuildResultFromMetadata(CdnUpdateMetadata metadata)
+    {
+        var versionText = FirstNonEmpty(metadata.VersionTag, metadata.ReleaseTag);
+        var latestVersion = ParseVersion(versionText);
+        if (latestVersion is null)
+        {
+            return null;
+        }
+
+        var releaseName = FirstNonEmpty(metadata.ReleaseName, metadata.ReleaseTag, metadata.VersionTag);
+        var releaseTag = FirstNonEmpty(metadata.ReleaseTag, metadata.VersionTag);
+        var releasePageUrl = FirstNonEmpty(metadata.ReleasePageUrl, ReleasesUrl);
+        var assetDownloadUrl = cdn.ResolveManagerAssetUrl(metadata.AssetPath, metadata.AssetUrl, out var mirrorUrl);
+        var assetName = FirstNonEmpty(Path.GetFileName(metadata.AssetPath ?? string.Empty), Path.GetFileName(new UriSafe(assetDownloadUrl).LocalPath), $"{releaseTag}.zip");
+
+        if (latestVersion > currentVersion && string.IsNullOrWhiteSpace(assetDownloadUrl))
+        {
+            return null;
+        }
+
+        return new UpdateCheckResult
+        {
+            CurrentVersion = currentVersion,
+            LatestVersion = latestVersion,
+            ReleaseName = releaseName,
+            ReleaseTag = releaseTag,
+            PublishedAt = metadata.PublishedAt,
+            ReleasePageUrl = releasePageUrl,
+            AssetName = assetName,
+            AssetDownloadUrl = assetDownloadUrl,
+            AssetMirrorUrl = mirrorUrl ?? string.Empty,
+            HasRelease = true,
+            IsUpdateAvailable = latestVersion > currentVersion
+        };
+    }
+
+    private async Task<UpdateCheckResult> CheckLatestFromGitHubAsync(CancellationToken cancellationToken)
     {
         var apiUrl = "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1";
 
@@ -98,46 +217,8 @@ public sealed class UpdateService
         }
         catch (Exception ex)
         {
-            return CreateFailureResult($"GitHub Releases API 闂備浇宕垫慨鏉懨洪銏犵哗闂侇剙绉甸崕鎴︽煟濡も偓閻楀棛娆㈤悙鍝勭骇闁割偒鍋勬禍顖滄偖? {ex.Message}");
+            return CreateFailureResult($"GitHub Releases API 请求失败: {ex.Message}");
         }
-    }
-
-    public async Task StartSelfUpdateAsync(
-        UpdateCheckResult release,
-        string installDirectory,
-        int processId,
-        IProgress<UpdateProgress>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (!release.HasRelease)
-        {
-            throw new InvalidOperationException("No public Release is available for auto update.");
-        }
-
-        if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
-        {
-            throw new InvalidOperationException("This Release does not provide a ZIP asset for auto update.");
-        }
-
-        var workDir = Path.Combine(Path.GetTempPath(), "OpenSteamTool.Manager", "update", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
-        var downloadDir = Path.Combine(workDir, "download");
-        var extractDir = Path.Combine(workDir, "extract");
-        Directory.CreateDirectory(downloadDir);
-        Directory.CreateDirectory(extractDir);
-
-        var zipPath = Path.Combine(downloadDir, release.AssetName);
-        var sourceRoot = await DownloadAssetAsync(release.AssetDownloadUrl, zipPath, progress, cancellationToken);
-
-        progress?.Report(new UpdateProgress { Stage = "Extracting", Percent = 0, Message = "Preparing update files..." });
-        ZipFile.ExtractToDirectory(sourceRoot, extractDir, overwriteFiles: true);
-
-        var payloadRoot = ResolvePayloadRoot(extractDir);
-        var exeName = Path.GetFileName(Environment.ProcessPath ?? "OpenSteamTool.Manager.exe");
-        var updateScript = Path.Combine(workDir, "apply-update.ps1");
-
-        await File.WriteAllTextAsync(updateScript, BuildScript(), new UTF8Encoding(false), cancellationToken);
-        StartHelperProcess(updateScript, payloadRoot, installDirectory, exeName, processId);
-        progress?.Report(new UpdateProgress { Stage = "Replacing", Percent = 100, Message = "Update helper started; the app will replace files and restart after exit." });
     }
 
     private UpdateCheckResult CreateNoReleaseResult()
@@ -187,51 +268,87 @@ public sealed class UpdateService
                ?? assets.FirstOrDefault(x => x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<string> DownloadAssetAsync(
-        string url,
+    private async Task<string> DownloadAssetWithFallbackAsync(
+        string primaryUrl,
+        string? mirrorUrl,
         string zipPath,
         IProgress<UpdateProgress>? progress,
         CancellationToken cancellationToken)
     {
-        using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream");
-        using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(primaryUrl))
         {
-            throw new InvalidOperationException(await github.BuildFailureMessageAsync(response, "GitHub release asset download failed", cancellationToken));
+            candidates.Add(primaryUrl.Trim());
         }
 
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = File.Create(zipPath);
-
-        var totalLength = response.Content.Headers.ContentLength;
-        var buffer = new byte[81920];
-        long readTotal = 0;
-        int read;
-        while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+        if (!string.IsNullOrWhiteSpace(mirrorUrl) && !candidates.Contains(mirrorUrl.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            readTotal += read;
+            candidates.Add(mirrorUrl.Trim());
+        }
 
-            if (totalLength.HasValue && totalLength.Value > 0)
+        Exception? lastFailure = null;
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var url = candidates[index];
+            try
             {
-                var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
+                using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders: false);
+                using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var message = await github.BuildFailureMessageAsync(response, "Update package download failed", cancellationToken, includeRateLimitDetails: false);
+                    throw new InvalidOperationException(message);
+                }
+
+                await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await using var output = File.Create(zipPath);
+
+                var totalLength = response.Content.Headers.ContentLength;
+                var buffer = new byte[81920];
+                long readTotal = 0;
+                int read;
+                while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+                {
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    readTotal += read;
+
+                    if (totalLength is > 0)
+                    {
+                        var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
+                        progress?.Report(new UpdateProgress
+                        {
+                            Stage = "Downloading",
+                            Percent = percent,
+                            Message = $"{percent}%"
+                        });
+                    }
+                }
+
                 progress?.Report(new UpdateProgress
                 {
                     Stage = "Downloading",
-                    Percent = percent,
-                    Message = $"濠电姵顔栭崰妤冩崲閹邦喖绶ら柦妯侯檧閼版寧銇勮箛鎾村櫧闁崇粯妫冮幃妤呮晲鎼粹€崇缂備椒妞掗崡鎶藉蓟閿熺姴鐐婄憸蹇涘箺閻樼粯鐓涢悘鐐存灮闊剛鈧?.. {percent}%"
+                    Percent = 100,
+                    Message = "Update package download completed."
                 });
+
+                return zipPath;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastFailure = ex;
+                if (index < candidates.Count - 1)
+                {
+                    progress?.Report(new UpdateProgress
+                    {
+                        Stage = "Downloading",
+                        Percent = 0,
+                        Message = "CDN 下载失败，正在尝试备用地址..."
+                    });
+                }
             }
         }
 
-        progress?.Report(new UpdateProgress
-        {
-            Stage = "Downloading",
-            Percent = 100,
-            Message = "Update package download completed."
-        });
-
-        return zipPath;
+        throw new InvalidOperationException(lastFailure?.Message ?? "Update package download failed.");
     }
 
     private static string ResolvePayloadRoot(string extractDir)
@@ -320,19 +437,19 @@ while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
 }
 
 if (-not (Test-Path -LiteralPath $Source)) {
-    throw "闂傚倷绀侀幖顐⒚洪妶澶嬪仱闁靛ň鏅涢拑鐔封攽閻樻彃鈧敻寮ㄩ敃鍌涚厵闂侇叏绠戦弸鐔虹磼閹邦収娈橀柟鍙夋倐閹囧醇閻旂尨绱辩紓鍌欑劍椤ㄥ懘藝闁秴鐒垫い鎺嶈兌閳洟鏌ㄥ顓犵瘈闁? $Source"
+    throw "Update source directory not found: $Source"
 }
 
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
 
 & "$env:SystemRoot\System32\robocopy.exe" $Source $Target /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) {
-    throw "Robocopy 婵犵數濮伴崹娲磿閼测晛鍨濋柛鎾楀嫬鏋傞梺鎸庢礀閸婂綊寮查鍌楀亾閸忓浜鹃梺鍛婃磸閸斿本绂嶆ィ鍐╃厓鐟滄粓宕滈悢椋庢殾婵炲棙鎸婚幆鐐烘煕閿旇骞栭柣? $LASTEXITCODE"
+    throw "Robocopy failed with exit code $LASTEXITCODE"
 }
 
 $exePath = Join-Path $Target $ExeName
 if (-not (Test-Path -LiteralPath $exePath)) {
-    throw "闂傚倷绀侀幖顐⒚洪妶澶嬪仱闁靛ň鏅涢拑鐔封攽閻樺弶鎼愰悷娆欑畵楠炴牗娼忛崜褏蓱闂佷紮缍€娴滎剛妲愰幒鏂哄亾閿濆簼鎲鹃柛搴＄箳缁辨帡鈥﹂幋婵嗙睄閻庢鍠氶弫濠氥€侀弮鍫濆窛妞ゆ挆鍕垫（闂? $exePath"
+    throw "Updated executable not found: $exePath"
 }
 
 Start-Process -FilePath $exePath -WorkingDirectory $Target | Out-Null
@@ -369,5 +486,27 @@ Start-Process -FilePath $exePath -WorkingDirectory $Target | Out-Null
 
         [JsonPropertyName("browser_download_url")]
         public string BrowserDownloadUrl { get; set; } = string.Empty;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private sealed class UriSafe
+    {
+        public UriSafe(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            {
+                Value = new Uri("https://example.invalid/");
+            }
+            else
+            {
+                Value = uri;
+            }
+        }
+
+        public Uri Value { get; }
+
+        public string LocalPath => Value.LocalPath;
     }
 }

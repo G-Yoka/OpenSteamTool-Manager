@@ -13,17 +13,25 @@ public sealed class GitHubHttpService
         this.tokenService = tokenService;
     }
 
-    public HttpRequestMessage CreateRequest(HttpMethod method, string url, string accept = "application/vnd.github+json")
+    public HttpRequestMessage CreateRequest(
+        HttpMethod method,
+        string url,
+        string accept = "application/vnd.github+json",
+        bool includeGitHubHeaders = true)
     {
         var request = new HttpRequestMessage(method, url);
         request.Headers.UserAgent.ParseAdd("OpenSteamTool.Manager");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
-        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
 
-        var token = tokenService.GetToken();
-        if (!string.IsNullOrWhiteSpace(token))
+        if (includeGitHubHeaders)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+
+            var token = tokenService.GetToken();
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
         }
 
         return request;
@@ -41,17 +49,20 @@ public sealed class GitHubHttpService
     public async Task<string> BuildFailureMessageAsync(
         HttpResponseMessage response,
         string context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeRateLimitDetails = true)
     {
         var message = $"{context}: {(int)response.StatusCode} {response.ReasonPhrase}";
         var body = await TryReadBodyAsync(response, cancellationToken);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden && IsRateLimited(response))
+        if (includeRateLimitDetails
+            && response.StatusCode == System.Net.HttpStatusCode.Forbidden
+            && IsRateLimited(response))
         {
             var resetText = FormatResetTime(response);
             message = string.IsNullOrWhiteSpace(resetText)
-                ? "GitHub API 已限流，请配置 PAT 或等待限制重置。"
-                : $"GitHub API 已限流，请配置 PAT 或等待限制重置。重置时间：{resetText}";
+                ? "GitHub API 已限流，请配置 PAT 或稍后重试。"
+                : $"GitHub API 已限流，请配置 PAT 或稍后重试。重置时间：{resetText}";
         }
 
         if (!string.IsNullOrWhiteSpace(body))

@@ -11,12 +11,13 @@ public static class AppServices
     public static TomlConfigService Toml { get; } = new();
     public static LuaGameConfigService Lua { get; } = new();
     public static SteamGameLibraryService SteamGames { get; } = new();
+    public static CdnService Cdn { get; } = new();
     public static GitHubTokenService GitHubToken { get; } = new();
     public static GitHubHttpService GitHub { get; } = new(GitHubToken);
-    public static GitHubGamePackageService GamePackages { get; } = new(GitHub);
+    public static GitHubGamePackageService GamePackages { get; } = new(GitHub, Cdn);
     public static GamePackageInstallService GameInstaller { get; } = new(GitHub);
     public static StatusService Status { get; } = new(Locator, Process, Payload, Lua);
-    public static UpdateService Updates { get; } = new(GitHub);
+    public static UpdateService Updates { get; } = new(GitHub, Cdn);
     public static IAppControlService AppControl { get; } = new AppControlService();
     public static IDialogService Dialogs { get; } = new DialogService();
     public static ITextPromptService Prompts { get; } = new TextPromptService();

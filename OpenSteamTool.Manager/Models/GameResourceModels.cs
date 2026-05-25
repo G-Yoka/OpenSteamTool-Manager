@@ -15,7 +15,9 @@ public sealed class GitHubGamePackage
     public string AppId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+    public string ZipPath { get; set; } = string.Empty;
     public string ZipUrl { get; set; } = string.Empty;
+    public string OriginalZipUrl { get; set; } = string.Empty;
     public string Sha256 { get; set; } = string.Empty;
     public string TargetRelativePath { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;

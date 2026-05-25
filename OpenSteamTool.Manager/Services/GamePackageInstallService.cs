@@ -66,7 +66,7 @@ public sealed class GamePackageInstallService
             var zipPath = Path.Combine(downloadDir, zipName);
 
             progress?.Report(new UpdateProgress { Stage = "downloading", Percent = 0, Message = $"Downloading {package.Name}..." });
-            await DownloadFileAsync(package.ZipUrl, zipPath, progress, cancellationToken);
+            await DownloadFileWithFallbackAsync(package.ZipUrl, package.OriginalZipUrl, zipPath, progress, cancellationToken);
 
             var downloadedHash = ComputeSha256(zipPath);
             if (!string.Equals(downloadedHash, package.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -286,42 +286,80 @@ public sealed class GamePackageInstallService
         }
     }
 
-    private async Task DownloadFileAsync(
-        string url,
+    private async Task DownloadFileWithFallbackAsync(
+        string primaryUrl,
+        string? mirrorUrl,
         string destinationPath,
         IProgress<UpdateProgress>? progress,
         CancellationToken cancellationToken)
     {
-        using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream");
-        using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(primaryUrl))
         {
-            throw new InvalidOperationException(await github.BuildFailureMessageAsync(response, "GitHub resource package download failed", cancellationToken));
+            candidates.Add(primaryUrl.Trim());
         }
 
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = File.Create(destinationPath);
-
-        var totalLength = response.Content.Headers.ContentLength;
-        var buffer = new byte[81920];
-        long readTotal = 0;
-        int read;
-        while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+        if (!string.IsNullOrWhiteSpace(mirrorUrl) && !candidates.Contains(mirrorUrl.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            readTotal += read;
+            candidates.Add(mirrorUrl.Trim());
+        }
 
-            if (totalLength is > 0)
+        Exception? lastFailure = null;
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var url = candidates[index];
+            try
             {
-                var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
-                progress?.Report(new UpdateProgress
+                using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders: false);
+                using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (!response.IsSuccessStatusCode)
                 {
-                    Stage = "downloading",
-                    Percent = percent,
-                    Message = $"{percent}%"
-                });
+                    var message = await github.BuildFailureMessageAsync(response, "Resource package download failed", cancellationToken, includeRateLimitDetails: false);
+                    throw new InvalidOperationException(message);
+                }
+
+                await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await using var output = File.Create(destinationPath);
+
+                var totalLength = response.Content.Headers.ContentLength;
+                var buffer = new byte[81920];
+                long readTotal = 0;
+                int read;
+                while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+                {
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    readTotal += read;
+
+                    if (totalLength is > 0)
+                    {
+                        var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
+                        progress?.Report(new UpdateProgress
+                        {
+                            Stage = "downloading",
+                            Percent = percent,
+                            Message = $"{percent}%"
+                        });
+                    }
+                }
+
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastFailure = ex;
+                if (index < candidates.Count - 1)
+                {
+                    progress?.Report(new UpdateProgress
+                    {
+                        Stage = "downloading",
+                        Percent = 0,
+                        Message = "CDN 下载失败，正在尝试备用地址..."
+                    });
+                }
             }
         }
+
+        throw new InvalidOperationException(lastFailure?.Message ?? "Resource package download failed.");
     }
 
     private static void ExtractZipSafely(string zipPath, string stageDir)
