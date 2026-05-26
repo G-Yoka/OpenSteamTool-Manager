@@ -52,6 +52,6 @@ OpenSteamTool.Manager/
   Assets/
 ```
 
-## 许可证
+## 许可
 
 本仓库采用 `GPL-3.0-only` 许可证。OpenSteamTool 相关上游项目同样遵循 GPL-3.0，第三方资源说明见仓库内相关文件。
