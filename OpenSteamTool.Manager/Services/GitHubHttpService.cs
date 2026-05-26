@@ -1,16 +1,25 @@
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
+using OpenSteamTool.Manager.Models;
 
 namespace OpenSteamTool.Manager.Services;
 
 public sealed class GitHubHttpService
 {
-    private static readonly HttpClient Http = new();
+    private readonly HttpClient http;
     private readonly GitHubTokenService tokenService;
+    private readonly GitHubDnsService dnsService;
 
-    public GitHubHttpService(GitHubTokenService tokenService)
+    public GitHubHttpService(GitHubTokenService tokenService, GitHubDnsService dnsService)
     {
         this.tokenService = tokenService;
+        this.dnsService = dnsService;
+        http = new HttpClient(CreateHandler(dnsService))
+        {
+            Timeout = TimeSpan.FromSeconds(120)
+        };
     }
 
     public HttpRequestMessage CreateRequest(
@@ -38,13 +47,13 @@ public sealed class GitHubHttpService
     }
 
     public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
-        => Http.SendAsync(request, cancellationToken);
+        => http.SendAsync(request, cancellationToken);
 
     public Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         HttpCompletionOption completionOption,
         CancellationToken cancellationToken = default)
-        => Http.SendAsync(request, completionOption, cancellationToken);
+        => http.SendAsync(request, completionOption, cancellationToken);
 
     public async Task<string> BuildFailureMessageAsync(
         HttpResponseMessage response,
@@ -56,7 +65,7 @@ public sealed class GitHubHttpService
         var body = await TryReadBodyAsync(response, cancellationToken);
 
         if (includeRateLimitDetails
-            && response.StatusCode == System.Net.HttpStatusCode.Forbidden
+            && response.StatusCode == HttpStatusCode.Forbidden
             && IsRateLimited(response))
         {
             var resetText = FormatResetTime(response);
@@ -67,10 +76,72 @@ public sealed class GitHubHttpService
 
         if (!string.IsNullOrWhiteSpace(body))
         {
-            message += $" 错误信息: {body}";
+            message += $"；错误信息：{body.Trim()}";
         }
 
         return message;
+    }
+
+    private static SocketsHttpHandler CreateHandler(GitHubDnsService dnsService)
+        => new()
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            ConnectCallback = async (context, cancellationToken) =>
+            {
+                var host = context.DnsEndPoint.Host;
+                var port = context.DnsEndPoint.Port;
+                var addresses = await ResolveAddressesAsync(dnsService, host, cancellationToken);
+                Exception? lastError = null;
+
+                foreach (var address in addresses)
+                {
+                    try
+                    {
+                        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                        try
+                        {
+                            await socket.ConnectAsync(address, port, cancellationToken);
+                            return new NetworkStream(socket, ownsSocket: true);
+                        }
+                        catch
+                        {
+                            socket.Dispose();
+                            throw;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                    }
+                }
+
+                throw new HttpRequestException($"无法连接到 {host}:{port}", lastError);
+            }
+        };
+
+    private static async ValueTask<IReadOnlyList<IPAddress>> ResolveAddressesAsync(
+        GitHubDnsService dnsService,
+        string host,
+        CancellationToken cancellationToken)
+    {
+        if (dnsService.IsGitHubHost(host))
+        {
+            var optimized = await dnsService.ResolveAsync(host, cancellationToken);
+            if (optimized.Count > 0)
+            {
+                return optimized;
+            }
+        }
+
+        try
+        {
+            return await Dns.GetHostAddressesAsync(host, cancellationToken);
+        }
+        catch
+        {
+            return Array.Empty<IPAddress>();
+        }
     }
 
     private static bool IsRateLimited(HttpResponseMessage response)

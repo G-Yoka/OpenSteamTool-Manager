@@ -1,6 +1,5 @@
 using System.Net.Http;
 using System.Text.Json;
-using OpenSteamTool.Manager.Helpers;
 using OpenSteamTool.Manager.Models;
 
 namespace OpenSteamTool.Manager.Services;
@@ -13,24 +12,24 @@ public sealed class GitHubGamePackageService
     };
 
     private readonly GitHubHttpService github;
-    private readonly CdnService cdn;
     private readonly ManagerSettingsService settings;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
     private GamePackageManifest? _cachedManifest;
     private DateTimeOffset _cachedAt;
 
-    public GitHubGamePackageService(GitHubHttpService github, CdnService cdn, ManagerSettingsService settings)
+    public GitHubGamePackageService(GitHubHttpService github, ManagerSettingsService settings)
     {
         this.github = github;
-        this.cdn = cdn;
         this.settings = settings;
     }
 
-    public string RepositoryUrl => $"https://github.com/{CdnService.GameResourcesOwner}/{CdnService.GameResourcesRepository}";
+    public string RepositoryUrl => "https://github.com/G-Yoka/GameResources";
 
-    public string ManifestUrl => settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst
-        ? cdn.GameResourcesFallbackManifestUrl
-        : cdn.GameResourcesManifestUrl;
+    public string ManifestUrl
+        => string.Join("; ", settings.Current.GameResourceManifestSources
+            .Where(source => source.Enabled)
+            .OrderBy(source => source.Order)
+            .Select(source => source.Url));
 
     public async Task<GamePackageManifest> LoadManifestAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
@@ -48,17 +47,24 @@ public sealed class GitHubGamePackageService
             }
 
             var errors = new List<string>();
-            var manifestResult = await LoadManifestByPriorityAsync(errors, cancellationToken);
-            var manifest = manifestResult.Manifest;
-            if (manifest is null)
+            var manifests = await LoadManifestsBySettingsAsync(errors, cancellationToken);
+            if (manifests.Count == 0)
             {
                 throw new InvalidOperationException(errors.Count == 0
-                    ? $"无法从 {ManifestUrl} 读取游戏资源清单。"
+                    ? $"无法读取游戏资源清单：{ManifestUrl}"
                     : string.Join("；", errors));
             }
 
-            NormalizePackages(manifest);
-            manifest.Items ??= new List<GitHubGamePackage>();
+            var manifest = new GamePackageManifest();
+            foreach (var loaded in manifests)
+            {
+                foreach (var item in loaded.Manifest.Items)
+                {
+                    NormalizePackage(item, loaded.SourceUrl);
+                    manifest.Items.Add(item);
+                }
+            }
+
             _cachedManifest = manifest;
             _cachedAt = DateTimeOffset.UtcNow;
             return manifest;
@@ -87,41 +93,52 @@ public sealed class GitHubGamePackageService
         _cachedAt = default;
     }
 
-    private async Task<(GamePackageManifest? Manifest, string? Error)> LoadManifestByPriorityAsync(
+    private async Task<List<(GamePackageManifest Manifest, string SourceUrl)>> LoadManifestsBySettingsAsync(
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var preferGitHub = settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst;
-        var candidates = preferGitHub
-            ? new[]
-            {
-                ("GitHub Raw", cdn.GameResourcesFallbackManifestUrl, false),
-                ("jsDelivr CDN", cdn.GameResourcesManifestUrl, false)
-            }
-            : new[]
-            {
-                ("jsDelivr CDN", cdn.GameResourcesManifestUrl, false),
-                ("GitHub Raw", cdn.GameResourcesFallbackManifestUrl, false)
-            };
+        var result = new List<(GamePackageManifest Manifest, string SourceUrl)>();
+        var sources = settings.Current.GameResourceManifestSources
+            .Where(source => source.Enabled && !string.IsNullOrWhiteSpace(source.Url))
+            .OrderBy(source => source.Order)
+            .ToList();
 
-        foreach (var (name, url, includeGitHubHeaders) in candidates)
+        if (sources.Count == 0)
         {
-            var result = await LoadManifestFromUrlAsync(url, includeGitHubHeaders, cancellationToken);
-            if (result.Manifest is not null)
+            errors.Add("未启用任何游戏资源清单源。");
+            return result;
+        }
+
+        foreach (var source in sources)
+        {
+            var candidates = BuildSourceCandidates(source.Url);
+            if (candidates.Count == 0)
             {
-                return result;
+                errors.Add($"清单源地址无效：{source.Url}");
+                continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(result.Error))
+            foreach (var candidate in candidates)
             {
-                errors.Add($"{name}: {result.Error}");
+                var manifestResult = await LoadManifestFromUrlAsync(candidate.Name, candidate.Url, candidate.IncludeGitHubHeaders, cancellationToken);
+                if (manifestResult.Manifest is not null)
+                {
+                    result.Add((manifestResult.Manifest, candidate.Url));
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(manifestResult.Error))
+                {
+                    errors.Add(manifestResult.Error);
+                }
             }
         }
 
-        return (null, null);
+        return result;
     }
 
     private async Task<(GamePackageManifest? Manifest, string? Error)> LoadManifestFromUrlAsync(
+        string sourceName,
         string url,
         bool includeGitHubHeaders,
         CancellationToken cancellationToken)
@@ -133,14 +150,15 @@ public sealed class GitHubGamePackageService
 
             if (!response.IsSuccessStatusCode)
             {
-                return (null, await github.BuildFailureMessageAsync(response, "资源清单请求失败", cancellationToken, includeGitHubHeaders));
+                var message = await github.BuildFailureMessageAsync(response, "资源清单请求失败", cancellationToken, includeGitHubHeaders);
+                return (null, $"{sourceName}: {message}");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var manifest = await JsonSerializer.DeserializeAsync<GamePackageManifest>(stream, JsonOptions, cancellationToken);
             if (manifest is null)
             {
-                return (null, "资源清单为空或格式无效。");
+                return (null, $"{sourceName}: 资源清单为空或格式无效。");
             }
 
             manifest.Items ??= new List<GitHubGamePackage>();
@@ -148,41 +166,145 @@ public sealed class GitHubGamePackageService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (null, ex.Message);
+            return (null, $"{sourceName}: {ex.Message}");
         }
     }
 
-    private void NormalizePackages(GamePackageManifest manifest)
+    private static IReadOnlyList<(string Name, string Url, bool IncludeGitHubHeaders)> BuildSourceCandidates(string url)
     {
-        var preferGitHub = settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst;
-        foreach (var item in manifest.Items)
+        var normalized = NormalizeManifestSourceUrl(url);
+        if (string.IsNullOrWhiteSpace(normalized))
         {
-            var originalUrl = item.ZipUrl?.Trim() ?? string.Empty;
-            var cdnUrl = cdn.ResolveGameResourceZipUrl(item.ZipUrl, item.ZipPath, out var mirrorUrl);
+            return Array.Empty<(string, string, bool)>();
+        }
 
-            if (preferGitHub && !string.IsNullOrWhiteSpace(originalUrl))
+        var includeGitHubHeaders = Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+            && uri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase);
+        var name = includeGitHubHeaders ? "GitHub API" : "资源清单";
+        return new[] { (name, normalized, includeGitHubHeaders) };
+    }
+
+    private void NormalizePackage(GitHubGamePackage item, string sourceUrl)
+    {
+        var originalUrl = item.ZipUrl?.Trim() ?? string.Empty;
+        var normalizedZipUrl = NormalizeDownloadUrl(originalUrl);
+        var sourceRelativeUrl = ResolveRelativeUrl(sourceUrl, item.ZipPath);
+
+        if (!string.IsNullOrWhiteSpace(normalizedZipUrl))
+        {
+            item.ZipUrl = normalizedZipUrl;
+            item.OriginalZipUrl = string.Empty;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceRelativeUrl))
+        {
+            item.ZipUrl = sourceRelativeUrl;
+            item.OriginalZipUrl = string.Empty;
+            return;
+        }
+
+        item.ZipUrl = string.Empty;
+        item.OriginalZipUrl = string.Empty;
+    }
+
+    private static string ResolveRelativeUrl(string sourceUrl, string zipPath)
+    {
+        if (string.IsNullOrWhiteSpace(zipPath))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(zipPath, UriKind.Absolute, out var absolute))
+        {
+            return NormalizeDownloadUrl(absolute.ToString());
+        }
+
+        if (!Uri.TryCreate(NormalizeManifestSourceUrl(sourceUrl), UriKind.Absolute, out var sourceUri))
+        {
+            return string.Empty;
+        }
+
+        return new Uri(sourceUri, zipPath.Replace('\\', '/')).ToString();
+    }
+
+    private static string NormalizeManifestSourceUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = url.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length >= 5
+                && (segments[2].Equals("blob", StringComparison.OrdinalIgnoreCase) || segments[2].Equals("raw", StringComparison.OrdinalIgnoreCase)))
             {
-                item.ZipUrl = originalUrl;
-                item.OriginalZipUrl = !string.Equals(originalUrl, cdnUrl, StringComparison.OrdinalIgnoreCase)
-                    ? cdnUrl
-                    : mirrorUrl ?? string.Empty;
-                continue;
-            }
-
-            if (preferGitHub && !string.IsNullOrWhiteSpace(item.ZipPath))
-            {
-                item.ZipUrl = cdn.BuildGameResourcesRawUrl(item.ZipPath);
-                item.OriginalZipUrl = cdnUrl;
-                continue;
-            }
-
-            item.ZipUrl = cdnUrl;
-            item.OriginalZipUrl = originalUrl;
-
-            if (string.IsNullOrWhiteSpace(item.OriginalZipUrl) && !string.IsNullOrWhiteSpace(mirrorUrl))
-            {
-                item.OriginalZipUrl = mirrorUrl;
+                var owner = segments[0];
+                var repo = segments[1];
+                var branch = segments[3];
+                var path = string.Join('/', segments.Skip(4));
+                return $"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}";
             }
         }
+
+        if (uri.Host.Equals("gitee.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = uri.AbsolutePath.Replace("/blob/", "/raw/", StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(path, uri.AbsolutePath, StringComparison.Ordinal))
+            {
+                var builder = new UriBuilder(uri) { Path = path };
+                return builder.Uri.ToString();
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static string NormalizeDownloadUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = url.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length >= 5
+                && (segments[2].Equals("blob", StringComparison.OrdinalIgnoreCase) || segments[2].Equals("raw", StringComparison.OrdinalIgnoreCase)))
+            {
+                var owner = segments[0];
+                var repo = segments[1];
+                var branch = segments[3];
+                var path = string.Join('/', segments.Skip(4));
+                return $"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}";
+            }
+        }
+
+        if (uri.Host.Equals("gitee.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = uri.AbsolutePath.Replace("/blob/", "/raw/", StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(path, uri.AbsolutePath, StringComparison.Ordinal))
+            {
+                var builder = new UriBuilder(uri) { Path = path };
+                return builder.Uri.ToString();
+            }
+        }
+
+        return trimmed;
     }
 }

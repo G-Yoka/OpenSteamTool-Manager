@@ -7,6 +7,8 @@ public sealed class CdnService
     public const string GameResourcesOwner = "G-Yoka";
     public const string GameResourcesRepository = "GameResources";
     public const string DefaultBranch = "main";
+    public static string GameResourcesCdnManifestUrl => BuildCdnUrl(GameResourcesOwner, GameResourcesRepository, "manifest.json");
+    public static string GameResourcesRawManifestUrl => $"https://raw.githubusercontent.com/{GameResourcesOwner}/{GameResourcesRepository}/{DefaultBranch}/manifest.json";
 
     public string ManagerRepositoryUrl => $"https://github.com/{ManagerOwner}/{ManagerRepository}";
 
@@ -14,9 +16,9 @@ public sealed class CdnService
 
     public string ManagerUpdateMetadataUrl => BuildManagerCdnUrl("cdn/update.json");
 
-    public string GameResourcesManifestUrl => BuildGameResourcesCdnUrl("manifest.json");
+    public string GameResourcesManifestUrl => GameResourcesCdnManifestUrl;
 
-    public string GameResourcesFallbackManifestUrl => $"https://raw.githubusercontent.com/{GameResourcesOwner}/{GameResourcesRepository}/{DefaultBranch}/manifest.json";
+    public string GameResourcesFallbackManifestUrl => GameResourcesRawManifestUrl;
 
     public string BuildManagerCdnUrl(string relativePath)
         => BuildCdnUrl(ManagerOwner, ManagerRepository, relativePath);

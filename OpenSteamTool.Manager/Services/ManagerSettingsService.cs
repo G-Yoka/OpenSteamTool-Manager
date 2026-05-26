@@ -6,6 +6,8 @@ namespace OpenSteamTool.Manager.Services;
 
 public sealed class ManagerSettingsService
 {
+    private const string DefaultManifestSourceUrl = "https://raw.githubusercontent.com/G-Yoka/GameResources/main/manifest.json";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -33,7 +35,8 @@ public sealed class ManagerSettingsService
             {
                 return new ManagerSettings
                 {
-                    NetworkSourcePriority = _current.NetworkSourcePriority,
+                    GitHubDnsOptimizationEnabled = _current.GitHubDnsOptimizationEnabled,
+                    GameResourceManifestSources = _current.GameResourceManifestSources.Select(CloneSource).ToList(),
                     LastSavedAtUtc = _current.LastSavedAtUtc
                 };
             }
@@ -59,15 +62,25 @@ public sealed class ManagerSettingsService
                 // Fall back to defaults when the settings file is unreadable.
             }
 
-            _current = new ManagerSettings();
+            _current = Normalize(new ManagerSettings());
         }
     }
 
-    public void SetNetworkSourcePriority(NetworkSourcePriority priority)
+    public void SetGitHubDnsOptimizationEnabled(bool enabled)
     {
         lock (_sync)
         {
-            _current.NetworkSourcePriority = priority;
+            _current.GitHubDnsOptimizationEnabled = enabled;
+            _current.LastSavedAtUtc = DateTimeOffset.UtcNow;
+            SaveUnsafe();
+        }
+    }
+
+    public void SetGameResourceManifestSources(IEnumerable<GameResourceManifestSource> sources)
+    {
+        lock (_sync)
+        {
+            _current.GameResourceManifestSources = NormalizeSources(sources);
             _current.LastSavedAtUtc = DateTimeOffset.UtcNow;
             SaveUnsafe();
         }
@@ -82,11 +95,86 @@ public sealed class ManagerSettingsService
 
     private static ManagerSettings Normalize(ManagerSettings settings)
     {
-        if (!Enum.IsDefined(typeof(NetworkSourcePriority), settings.NetworkSourcePriority))
+        settings.GameResourceManifestSources = NormalizeSources(settings.GameResourceManifestSources);
+        return settings;
+    }
+
+    private static List<GameResourceManifestSource> NormalizeSources(IEnumerable<GameResourceManifestSource>? sources)
+    {
+        var result = (sources ?? Array.Empty<GameResourceManifestSource>())
+            .Select(source => new GameResourceManifestSource
+            {
+                Order = source.Order,
+                Url = NormalizeManifestSourceUrl(source.Url),
+                Enabled = source.Enabled
+            })
+            .Where(source => !string.IsNullOrWhiteSpace(source.Url))
+            .Select(CloneSource)
+            .ToList();
+
+        if (result.Count == 0)
         {
-            settings.NetworkSourcePriority = NetworkSourcePriority.CdnFirst;
+            result.Add(new GameResourceManifestSource
+            {
+                Url = DefaultManifestSourceUrl,
+                Enabled = true
+            });
         }
 
-        return settings;
+        for (var index = 0; index < result.Count; index++)
+        {
+            result[index].Order = index + 1;
+            result[index].Url = result[index].Url.Trim();
+        }
+
+        return result;
+    }
+
+    private static GameResourceManifestSource CloneSource(GameResourceManifestSource source)
+        => new()
+        {
+            Order = source.Order,
+            Url = source.Url,
+            Enabled = source.Enabled
+        };
+
+    private static string NormalizeManifestSourceUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = url.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length >= 5
+                && (segments[2].Equals("blob", StringComparison.OrdinalIgnoreCase) || segments[2].Equals("raw", StringComparison.OrdinalIgnoreCase)))
+            {
+                var owner = segments[0];
+                var repo = segments[1];
+                var branch = segments[3];
+                var path = string.Join('/', segments.Skip(4));
+                return $"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}";
+            }
+        }
+
+        if (uri.Host.Equals("gitee.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var path = uri.AbsolutePath.Replace("/blob/", "/raw/", StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(path, uri.AbsolutePath, StringComparison.Ordinal))
+            {
+                var builder = new UriBuilder(uri) { Path = path };
+                return builder.Uri.ToString();
+            }
+        }
+
+        return trimmed;
     }
 }

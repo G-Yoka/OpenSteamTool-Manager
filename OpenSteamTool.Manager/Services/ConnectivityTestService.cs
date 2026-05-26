@@ -1,30 +1,68 @@
 using System.Diagnostics;
 using System.Net.Http;
-using OpenSteamTool.Manager.Helpers;
 using OpenSteamTool.Manager.Models;
 
 namespace OpenSteamTool.Manager.Services;
 
 public sealed class ConnectivityTestService
 {
+    private readonly GitHubDnsService dns;
     private readonly GitHubHttpService github;
-    private readonly CdnService cdn;
+    private readonly ManagerSettingsService settings;
 
-    public ConnectivityTestService(GitHubHttpService github, CdnService cdn)
+    public ConnectivityTestService(GitHubDnsService dns, GitHubHttpService github, ManagerSettingsService settings)
     {
+        this.dns = dns;
         this.github = github;
-        this.cdn = cdn;
+        this.settings = settings;
     }
 
     public async Task<IReadOnlyList<ConnectivityTestResult>> TestAsync(CancellationToken cancellationToken = default)
     {
         var results = new List<ConnectivityTestResult>
         {
-            await TestEndpointAsync("jsDelivr CDN", "更新元数据", cdn.ManagerUpdateMetadataUrl, "application/json", includeGitHubHeaders: false, cancellationToken),
-            await TestEndpointAsync("GitHub API", "更新发布列表", "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1", "application/vnd.github+json", includeGitHubHeaders: true, cancellationToken),
-            await TestEndpointAsync("jsDelivr CDN", "游戏资源清单", cdn.GameResourcesManifestUrl, "application/json", includeGitHubHeaders: false, cancellationToken),
-            await TestEndpointAsync("GitHub Raw", "游戏资源清单", cdn.GameResourcesFallbackManifestUrl, "application/json", includeGitHubHeaders: false, cancellationToken)
+            new()
+            {
+                Source = "GitHub DNS",
+                Purpose = "优化开关",
+                Status = dns.IsEnabled ? "已启用" : "已关闭",
+                DurationMs = 0,
+                Detail = dns.StateText
+            }
         };
+
+        foreach (var host in dns.Hosts)
+        {
+            results.Add(await dns.TestResolveAsync(host, cancellationToken));
+        }
+
+        results.Add(await TestEndpointAsync(
+            "GitHub API",
+            "更新发布列表",
+            "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1",
+            "application/vnd.github+json",
+            includeGitHubHeaders: true,
+            cancellationToken));
+
+        results.AddRange(await TestManifestSourcesAsync(cancellationToken));
+        return results;
+    }
+
+    private async Task<IReadOnlyList<ConnectivityTestResult>> TestManifestSourcesAsync(CancellationToken cancellationToken)
+    {
+        var results = new List<ConnectivityTestResult>();
+        foreach (var source in settings.Current.GameResourceManifestSources
+                     .Where(source => source.Enabled && !string.IsNullOrWhiteSpace(source.Url))
+                     .OrderBy(source => source.Order))
+        {
+            results.Add(await TestEndpointAsync(
+                "资源清单源",
+                $"第 {source.Order} 个清单",
+                source.Url,
+                "application/json",
+                IsGitHubApiUrl(source.Url),
+                cancellationToken));
+        }
 
         return results;
     }
@@ -47,7 +85,7 @@ public sealed class ConnectivityTestService
             using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
 
             var status = response.IsSuccessStatusCode
-                ? "可访问"
+                ? BuildSuccessStatus(response, accept)
                 : await github.BuildFailureMessageAsync(response, "连通性测试失败", timeout.Token);
 
             return new ConnectivityTestResult
@@ -81,5 +119,23 @@ public sealed class ConnectivityTestService
                 Detail = $"{url} - {ex.Message}"
             };
         }
+    }
+
+    private static bool IsGitHubApiUrl(string url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var uri)
+           && (uri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase)
+               || uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+               || uri.Host.EndsWith("githubusercontent.com", StringComparison.OrdinalIgnoreCase));
+
+    private static string BuildSuccessStatus(HttpResponseMessage response, string accept)
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+        if (accept.Contains("json", StringComparison.OrdinalIgnoreCase)
+            && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "可访问，但返回内容不是 JSON";
+        }
+
+        return "可访问";
     }
 }

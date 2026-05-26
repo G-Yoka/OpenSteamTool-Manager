@@ -38,6 +38,7 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<SteamGameInfo> SteamGames { get; } = new();
     public ObservableCollection<GitHubGamePackage> GamePackages { get; } = new();
     public ObservableCollection<ConnectivityTestResult> ConnectivityResults { get; } = new();
+    public ObservableCollection<GameResourceManifestSource> GameResourceManifestSources { get; } = new();
 
     [ObservableProperty]
     private string steamPath = string.Empty;
@@ -85,16 +86,20 @@ public partial class MainViewModel : ViewModelBase
     private string gitHubTokenStateText = string.Empty;
 
     [ObservableProperty]
-    private string selectedNetworkSourcePriority = NetworkSourcePriority.CdnFirst.ToString();
+    private bool gitHubDnsOptimizationEnabled = true;
 
     [ObservableProperty]
-    private string networkSourceStateText = string.Empty;
+    private string gitHubDnsStateText = string.Empty;
 
     [ObservableProperty]
     private string settingsSavedText = string.Empty;
 
     [ObservableProperty]
     private string connectivityStateText = "未测试";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RemoveGameResourceManifestSourceCommand))]
+    private GameResourceManifestSource? selectedGameResourceManifestSource;
 
     [ObservableProperty]
     private string logsText = string.Empty;
@@ -268,6 +273,48 @@ public partial class MainViewModel : ViewModelBase
 
             var available = results.Count(x => x.Status.StartsWith("可访问", StringComparison.OrdinalIgnoreCase));
             ConnectivityStateText = $"{available}/{results.Count} 可访问";
+        });
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private void AddGameResourceManifestSource()
+    {
+        var source = new GameResourceManifestSource
+        {
+            Order = GameResourceManifestSources.Count + 1,
+            Url = "https://raw.githubusercontent.com/owner/repository/main/manifest.json",
+            Enabled = true
+        };
+        GameResourceManifestSources.Add(source);
+        SelectedGameResourceManifestSource = source;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanModifyGameResourceManifestSource))]
+    private void RemoveGameResourceManifestSource(GameResourceManifestSource? source)
+    {
+        var target = source ?? SelectedGameResourceManifestSource;
+        if (target is null)
+        {
+            return;
+        }
+
+        GameResourceManifestSources.Remove(target);
+        RenumberGameResourceManifestSources();
+        SelectedGameResourceManifestSource = GameResourceManifestSources.FirstOrDefault();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private async Task SaveGameResourceManifestSourcesAsync()
+        => await ExecuteBusyAsync("正在保存游戏资源清单源...", async () =>
+        {
+            RenumberGameResourceManifestSources();
+            _settings.SetGameResourceManifestSources(GameResourceManifestSources);
+            _gamePackages.ClearCache();
+            UpdateGitHubDnsState(_settings.Current);
+
+            if (SelectedSteamGame is not null)
+            {
+                await LoadPackagesForSelectedSteamGameAsync(true, SelectedSteamGame.AppId);
+            }
         });
 
     [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
@@ -712,8 +759,15 @@ public partial class MainViewModel : ViewModelBase
         _loadingSettings = true;
         try
         {
-            SelectedNetworkSourcePriority = settings.NetworkSourcePriority.ToString();
-            UpdateNetworkSourceState(settings);
+            GitHubDnsOptimizationEnabled = settings.GitHubDnsOptimizationEnabled;
+            GameResourceManifestSources.Clear();
+            foreach (var source in settings.GameResourceManifestSources)
+            {
+                GameResourceManifestSources.Add(source);
+            }
+
+            SelectedGameResourceManifestSource = GameResourceManifestSources.FirstOrDefault();
+            UpdateGitHubDnsState(settings);
         }
         finally
         {
@@ -721,24 +775,25 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void SaveNetworkSourcePriority(string value)
+    private void SaveGitHubDnsOptimization(bool enabled)
     {
-        if (!Enum.TryParse<NetworkSourcePriority>(value, out var priority))
-        {
-            priority = NetworkSourcePriority.CdnFirst;
-        }
-
-        _settings.SetNetworkSourcePriority(priority);
-        _gamePackages.ClearCache();
-        _latestUpdate = null;
-        UpdateNetworkSourceState(_settings.Current);
+        _settings.SetGitHubDnsOptimizationEnabled(enabled);
+        UpdateGitHubDnsState(_settings.Current);
     }
 
-    private void UpdateNetworkSourceState(ManagerSettings settings)
+    private void RenumberGameResourceManifestSources()
     {
-        NetworkSourceStateText = settings.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst
-            ? "当前优先使用 GitHub Releases / GitHub 原始地址，失败时回退 jsDelivr CDN。"
-            : "当前优先使用 jsDelivr CDN，失败时回退 GitHub。";
+        for (var index = 0; index < GameResourceManifestSources.Count; index++)
+        {
+            GameResourceManifestSources[index].Order = index + 1;
+        }
+    }
+
+    private void UpdateGitHubDnsState(ManagerSettings settings)
+    {
+        GitHubDnsStateText = settings.GitHubDnsOptimizationEnabled
+            ? "GitHub DNS 优化：已启用，仅对 GitHub 相关域名使用 DoH 解析。"
+            : "GitHub DNS 优化：已关闭，GitHub 请求将直接使用系统 DNS。";
         SettingsSavedText = settings.LastSavedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") is { } savedAt
             ? $"最后保存：{savedAt}"
             : "使用默认设置";
@@ -1032,6 +1087,9 @@ public partial class MainViewModel : ViewModelBase
     private bool CanModifySelectedGamePackage()
         => !IsBusy && SelectedSteamGame is not null && SelectedGamePackage is not null;
 
+    private bool CanModifyGameResourceManifestSource(GameResourceManifestSource? source)
+        => !IsBusy && (source is not null || SelectedGameResourceManifestSource is not null);
+
     private void UpdateSummaryText()
     {
         SummaryText = $"Steam {SteamStateText}，版本 {SteamVersionText}，DLL {DllStatuses.Count(x => x.Installed && x.MatchesPayload)}/{DllStatuses.Count} 已匹配，Lua {Games.Count} 个，TOML {TomlStateText}";
@@ -1096,14 +1154,17 @@ public partial class MainViewModel : ViewModelBase
     partial void OnSelectedGamePackageChanged(GitHubGamePackage? value)
         => NotifyCommandStates();
 
-    partial void OnSelectedNetworkSourcePriorityChanged(string value)
+    partial void OnSelectedGameResourceManifestSourceChanged(GameResourceManifestSource? value)
+        => NotifyCommandStates();
+
+    partial void OnGitHubDnsOptimizationEnabledChanged(bool value)
     {
         if (_loadingSettings)
         {
             return;
         }
 
-        SaveNetworkSourcePriority(value);
+        SaveGitHubDnsOptimization(value);
     }
 
     private void NotifyCommandStates()
@@ -1122,6 +1183,9 @@ public partial class MainViewModel : ViewModelBase
         SetGitHubTokenCommand.NotifyCanExecuteChanged();
         ClearGitHubTokenCommand.NotifyCanExecuteChanged();
         TestConnectivityCommand.NotifyCanExecuteChanged();
+        AddGameResourceManifestSourceCommand.NotifyCanExecuteChanged();
+        RemoveGameResourceManifestSourceCommand.NotifyCanExecuteChanged();
+        SaveGameResourceManifestSourcesCommand.NotifyCanExecuteChanged();
         AddGameCommand.NotifyCanExecuteChanged();
         ImportGameCommand.NotifyCanExecuteChanged();
         SaveGameCommand.NotifyCanExecuteChanged();

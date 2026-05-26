@@ -1,12 +1,11 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
-using System.Net.Http;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using OpenSteamTool.Manager.Helpers;
+using System.Net.Http;
 using OpenSteamTool.Manager.Models;
 
 namespace OpenSteamTool.Manager.Services;
@@ -19,171 +18,21 @@ public sealed class UpdateService
     };
 
     private readonly GitHubHttpService github;
-    private readonly CdnService cdn;
-    private readonly ManagerSettingsService settings;
     private readonly Version currentVersion;
 
-    public UpdateService(GitHubHttpService github, CdnService cdn, ManagerSettingsService settings)
+    public UpdateService(GitHubHttpService github)
     {
         this.github = github;
-        this.cdn = cdn;
-        this.settings = settings;
         currentVersion = ReadCurrentVersion();
     }
 
     public string CurrentVersionText => currentVersion.ToString(3);
 
-    public string RepositoryUrl => cdn.ManagerRepositoryUrl;
+    public string RepositoryUrl => "https://github.com/G-Yoka/OpenSteamTool-Manager";
 
-    public string ReleasesUrl => cdn.ManagerReleasesUrl;
+    public string ReleasesUrl => $"{RepositoryUrl}/releases";
 
     public async Task<UpdateCheckResult> CheckLatestAsync(CancellationToken cancellationToken = default)
-    {
-        if (settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst)
-        {
-            var githubResult = await CheckLatestFromGitHubAsync(cancellationToken);
-            if (githubResult.HasRelease && githubResult.ErrorMessage is null)
-            {
-                return await AddCdnMirrorIfAvailableAsync(githubResult, cancellationToken);
-            }
-
-            return await TryLoadLatestFromCdnAsync(cancellationToken) ?? githubResult;
-        }
-
-        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
-        return cdnResult ?? await CheckLatestFromGitHubAsync(cancellationToken);
-    }
-
-    public async Task StartSelfUpdateAsync(
-        UpdateCheckResult release,
-        string installDirectory,
-        int processId,
-        IProgress<UpdateProgress>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (!release.HasRelease)
-        {
-            throw new InvalidOperationException("没有可用于自动更新的公开 Release。");
-        }
-
-        if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
-        {
-            throw new InvalidOperationException("该 Release 没有可下载的 ZIP 发布包。");
-        }
-
-        var workDir = Path.Combine(Path.GetTempPath(), "OpenSteamTool.Manager", "update", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
-        var downloadDir = Path.Combine(workDir, "download");
-        var extractDir = Path.Combine(workDir, "extract");
-        Directory.CreateDirectory(downloadDir);
-        Directory.CreateDirectory(extractDir);
-
-        var zipName = string.IsNullOrWhiteSpace(release.AssetName) ? "OpenSteamTool.Manager-update.zip" : release.AssetName;
-        var zipPath = Path.Combine(downloadDir, zipName);
-        var sourceRoot = await DownloadAssetWithFallbackAsync(release.AssetDownloadUrl, release.AssetMirrorUrl, zipPath, progress, cancellationToken);
-
-        progress?.Report(new UpdateProgress { Stage = "解压中", Percent = 0, Message = "正在准备更新文件..." });
-        ZipFile.ExtractToDirectory(sourceRoot, extractDir, overwriteFiles: true);
-
-        var payloadRoot = ResolvePayloadRoot(extractDir);
-        var exeName = Path.GetFileName(Environment.ProcessPath ?? "OpenSteamTool.Manager.exe");
-        var updateScript = Path.Combine(workDir, "apply-update.ps1");
-
-        await File.WriteAllTextAsync(updateScript, BuildScript(), new UTF8Encoding(false), cancellationToken);
-        StartHelperProcess(updateScript, payloadRoot, installDirectory, exeName, processId);
-        progress?.Report(new UpdateProgress { Stage = "替换中", Percent = 100, Message = "更新辅助进程已启动，主程序退出后将自动替换并重启。" });
-    }
-
-    private async Task<UpdateCheckResult?> TryLoadLatestFromCdnAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var request = github.CreateRequest(HttpMethod.Get, cdn.ManagerUpdateMetadataUrl, "application/json", includeGitHubHeaders: false);
-            using var response = await github.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            var metadata = await JsonSerializer.DeserializeAsync<CdnUpdateMetadata>(stream, JsonOptions, cancellationToken);
-            return metadata is null ? null : BuildResultFromMetadata(metadata);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task<UpdateCheckResult> AddCdnMirrorIfAvailableAsync(UpdateCheckResult result, CancellationToken cancellationToken)
-    {
-        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
-        if (cdnResult is null
-            || cdnResult.LatestVersion is null
-            || result.LatestVersion is null
-            || cdnResult.LatestVersion != result.LatestVersion
-            || string.IsNullOrWhiteSpace(cdnResult.AssetDownloadUrl))
-        {
-            return result;
-        }
-
-        return new UpdateCheckResult
-        {
-            CurrentVersion = result.CurrentVersion,
-            LatestVersion = result.LatestVersion,
-            ReleaseName = result.ReleaseName,
-            ReleaseTag = result.ReleaseTag,
-            PublishedAt = result.PublishedAt,
-            ReleasePageUrl = result.ReleasePageUrl,
-            AssetName = result.AssetName,
-            AssetDownloadUrl = result.AssetDownloadUrl,
-            AssetMirrorUrl = cdnResult.AssetDownloadUrl,
-            HasRelease = result.HasRelease,
-            IsUpdateAvailable = result.IsUpdateAvailable,
-            ErrorMessage = result.ErrorMessage
-        };
-    }
-
-    private UpdateCheckResult? BuildResultFromMetadata(CdnUpdateMetadata metadata)
-    {
-        var versionText = FirstNonEmpty(metadata.VersionTag, metadata.ReleaseTag);
-        var latestVersion = ParseVersion(versionText);
-        if (latestVersion is null)
-        {
-            return null;
-        }
-
-        var releaseName = FirstNonEmpty(metadata.ReleaseName, metadata.ReleaseTag, metadata.VersionTag);
-        var releaseTag = FirstNonEmpty(metadata.ReleaseTag, metadata.VersionTag);
-        var releasePageUrl = FirstNonEmpty(metadata.ReleasePageUrl, ReleasesUrl);
-        var assetDownloadUrl = cdn.ResolveManagerAssetUrl(metadata.AssetPath, metadata.AssetUrl, out var mirrorUrl);
-        var assetName = FirstNonEmpty(Path.GetFileName(metadata.AssetPath ?? string.Empty), Path.GetFileName(new UriSafe(assetDownloadUrl).LocalPath), $"{releaseTag}.zip");
-
-        if (latestVersion > currentVersion && string.IsNullOrWhiteSpace(assetDownloadUrl))
-        {
-            return null;
-        }
-
-        return new UpdateCheckResult
-        {
-            CurrentVersion = currentVersion,
-            LatestVersion = latestVersion,
-            ReleaseName = releaseName,
-            ReleaseTag = releaseTag,
-            PublishedAt = metadata.PublishedAt,
-            ReleasePageUrl = releasePageUrl,
-            AssetName = assetName,
-            AssetDownloadUrl = assetDownloadUrl,
-            AssetMirrorUrl = mirrorUrl ?? string.Empty,
-            HasRelease = true,
-            IsUpdateAvailable = latestVersion > currentVersion
-        };
-    }
-
-    private async Task<UpdateCheckResult> CheckLatestFromGitHubAsync(CancellationToken cancellationToken)
     {
         const string apiUrl = "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1";
 
@@ -228,7 +77,6 @@ public sealed class UpdateService
             }
 
             var asset = FindUpdateAsset(release.Assets);
-
             return new UpdateCheckResult
             {
                 CurrentVersion = currentVersion,
@@ -253,6 +101,45 @@ public sealed class UpdateService
         }
     }
 
+    public async Task StartSelfUpdateAsync(
+        UpdateCheckResult release,
+        string installDirectory,
+        int processId,
+        IProgress<UpdateProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!release.HasRelease)
+        {
+            throw new InvalidOperationException("没有可用于自动更新的公开 Release。");
+        }
+
+        if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
+        {
+            throw new InvalidOperationException("该 Release 没有可下载的 ZIP 发布包。");
+        }
+
+        var workDir = Path.Combine(Path.GetTempPath(), "OpenSteamTool.Manager", "update", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
+        var downloadDir = Path.Combine(workDir, "download");
+        var extractDir = Path.Combine(workDir, "extract");
+        Directory.CreateDirectory(downloadDir);
+        Directory.CreateDirectory(extractDir);
+
+        var zipName = string.IsNullOrWhiteSpace(release.AssetName) ? "OpenSteamTool.Manager-update.zip" : release.AssetName;
+        var zipPath = Path.Combine(downloadDir, zipName);
+        await DownloadAssetAsync(release.AssetDownloadUrl, zipPath, progress, cancellationToken);
+
+        progress?.Report(new UpdateProgress { Stage = "解压中", Percent = 0, Message = "正在准备更新文件..." });
+        ZipFile.ExtractToDirectory(zipPath, extractDir, overwriteFiles: true);
+
+        var payloadRoot = ResolvePayloadRoot(extractDir);
+        var exeName = Path.GetFileName(Environment.ProcessPath ?? "OpenSteamTool.Manager.exe");
+        var updateScript = Path.Combine(workDir, "apply-update.ps1");
+
+        await File.WriteAllTextAsync(updateScript, BuildScript(), new UTF8Encoding(false), cancellationToken);
+        StartHelperProcess(updateScript, payloadRoot, installDirectory, exeName, processId);
+        progress?.Report(new UpdateProgress { Stage = "替换中", Percent = 100, Message = "更新辅助进程已启动，主程序退出后将自动替换并重启。" });
+    }
+
     private UpdateCheckResult CreateNoReleaseResult()
         => new()
         {
@@ -267,6 +154,64 @@ public sealed class UpdateService
             HasRelease = false,
             ErrorMessage = message
         };
+
+    private async Task DownloadAssetAsync(
+        string url,
+        string zipPath,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        progress?.Report(new UpdateProgress { Stage = "下载中", Percent = 0, Message = "正在下载更新包..." });
+
+        using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders: false);
+        using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = await github.BuildFailureMessageAsync(response, "更新包下载失败", cancellationToken, includeRateLimitDetails: false);
+            throw new InvalidOperationException(message);
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var output = File.Create(zipPath);
+
+        var totalLength = response.Content.Headers.ContentLength;
+        var buffer = new byte[81920];
+        long readTotal = 0;
+        int read;
+        while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+        {
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            readTotal += read;
+
+            if (totalLength is > 0)
+            {
+                var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
+                progress?.Report(new UpdateProgress
+                {
+                    Stage = "下载中",
+                    Percent = percent,
+                    Message = "正在下载更新包..."
+                });
+            }
+        }
+    }
+
+    private Version ReadCurrentVersion()
+    {
+        var entry = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        var informational = entry.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            var trimmed = informational.Trim().TrimStart('v', 'V');
+            if (Version.TryParse(trimmed, out var version))
+            {
+                return Normalize(version);
+            }
+        }
+
+        var versionInfo = entry.GetName().Version ?? new Version(0, 0, 0, 0);
+        return Normalize(versionInfo);
+    }
 
     private static Version? ParseVersion(string? tagName)
     {
@@ -293,90 +238,6 @@ public sealed class UpdateService
                    x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
                    && x.Name.Contains("OpenSteamTool.Manager", StringComparison.OrdinalIgnoreCase))
                ?? assets.FirstOrDefault(x => x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private async Task<string> DownloadAssetWithFallbackAsync(
-        string primaryUrl,
-        string? mirrorUrl,
-        string zipPath,
-        IProgress<UpdateProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(primaryUrl))
-        {
-            candidates.Add(primaryUrl.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(mirrorUrl) && !candidates.Contains(mirrorUrl.Trim(), StringComparer.OrdinalIgnoreCase))
-        {
-            candidates.Add(mirrorUrl.Trim());
-        }
-
-        Exception? lastFailure = null;
-        for (var index = 0; index < candidates.Count; index++)
-        {
-            var url = candidates[index];
-            try
-            {
-                var includeGitHubHeaders = Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                    && uri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase);
-                using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders);
-                using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var message = await github.BuildFailureMessageAsync(response, "更新包下载失败", cancellationToken, includeRateLimitDetails: false);
-                    throw new InvalidOperationException(message);
-                }
-
-                await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-                await using var output = File.Create(zipPath);
-
-                var totalLength = response.Content.Headers.ContentLength;
-                var buffer = new byte[81920];
-                long readTotal = 0;
-                int read;
-                while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
-                {
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                    readTotal += read;
-
-                    if (totalLength is > 0)
-                    {
-                        progress?.Report(new UpdateProgress
-                        {
-                            Stage = "下载中",
-                            Percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100),
-                            Message = "正在下载更新包..."
-                        });
-                    }
-                }
-
-                progress?.Report(new UpdateProgress
-                {
-                    Stage = "下载中",
-                    Percent = 100,
-                    Message = "更新包下载完成。"
-                });
-
-                return zipPath;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                lastFailure = ex;
-                if (index < candidates.Count - 1)
-                {
-                    progress?.Report(new UpdateProgress
-                    {
-                        Stage = "下载中",
-                        Percent = 0,
-                        Message = "首选下载源失败，正在尝试备用地址..."
-                    });
-                }
-            }
-        }
-
-        throw new InvalidOperationException(lastFailure?.Message ?? "更新包下载失败。");
     }
 
     private static string ResolvePayloadRoot(string extractDir)
@@ -430,23 +291,6 @@ public sealed class UpdateService
         startInfo.ArgumentList.Add(processId.ToString());
 
         using var helper = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动更新辅助进程。");
-    }
-
-    private static Version ReadCurrentVersion()
-    {
-        var entry = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
-        var informational = entry.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            var trimmed = informational.Trim().TrimStart('v', 'V');
-            if (Version.TryParse(trimmed, out var version))
-            {
-                return Normalize(version);
-            }
-        }
-
-        var versionInfo = entry.GetName().Version ?? new Version(0, 0, 0, 0);
-        return Normalize(versionInfo);
     }
 
     private static string BuildScript()
@@ -514,22 +358,5 @@ Start-Process -FilePath $exePath -WorkingDirectory $Target | Out-Null
 
         [JsonPropertyName("browser_download_url")]
         public string BrowserDownloadUrl { get; set; } = string.Empty;
-    }
-
-    private static string FirstNonEmpty(params string?[] values)
-        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
-
-    private sealed class UriSafe
-    {
-        public UriSafe(string value)
-        {
-            Value = !string.IsNullOrWhiteSpace(value) && Uri.TryCreate(value, UriKind.Absolute, out var uri)
-                ? uri
-                : new Uri("https://example.invalid/");
-        }
-
-        public Uri Value { get; }
-
-        public string LocalPath => Value.LocalPath;
     }
 }

@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="OpenSteamTool 管理器"
+        Icon="/Assets/Yoka.ico"
         Width="1160" Height="780"
         MinWidth="980" MinHeight="680"
         WindowStartupLocation="CenterScreen">
@@ -305,24 +306,63 @@
 
                         <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
                             <StackPanel>
-                                <TextBlock Text="网络来源优先级" Foreground="#6B7280" />
-                                <ComboBox Width="320"
-                                          HorizontalAlignment="Left"
-                                          SelectedValuePath="Tag"
-                                          SelectedValue="{Binding SelectedNetworkSourcePriority, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=CdnFirst}"
-                                          ToolTip="控制更新检查、更新包下载、游戏资源清单和资源 ZIP 的首选来源。失败时仍会自动回退备用来源。">
-                                    <ComboBoxItem Content="jsDelivr CDN 优先" Tag="CdnFirst" />
-                                    <ComboBoxItem Content="GitHub Releases 优先" Tag="GitHubFirst" />
-                                </ComboBox>
-                                <TextBlock Text="{Binding NetworkSourceStateText, FallbackValue=''}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="GitHub DNS 优化" Foreground="#6B7280" />
+                                <CheckBox Content="启用 DoH 解析，仅作用于 GitHub 相关域名"
+                                          IsChecked="{Binding GitHubDnsOptimizationEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=True}"
+                                          ToolTip="开启后，管理器仅对 GitHub 相关域名使用应用内 DoH 解析；未命中或解析失败时会回退系统 DNS。"
+                                          HorizontalAlignment="Left" />
+                                <TextBlock Text="{Binding GitHubDnsStateText, FallbackValue=''}" Margin="0,6,0,0" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding SettingsSavedText, FallbackValue=''}" Margin="0,4,0,0" Foreground="#6B7280" />
                             </StackPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top">
+                                    <TextBlock Text="游戏资源清单源" Foreground="#6B7280" />
+                                    <TextBlock Text="可添加其他作者提供的资源清单地址。启用的清单会在“游戏资源”页按 AppId 合并显示。GitHub/Gitee 的网页地址会自动尝试转换为原始 JSON 地址。" Margin="0,4,0,10" Foreground="#4B5563" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <Button Content="新增清单源" Command="{Binding AddGameResourceManifestSourceCommand}" />
+                                        <Button Content="保存清单源" Command="{Binding SaveGameResourceManifestSourcesCommand}" ToolTip="保存表格中的链接和启用状态，并刷新当前游戏的资源列表。" />
+                                        <Button Content="删除选中" Command="{Binding RemoveGameResourceManifestSourceCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <DataGrid ItemsSource="{Binding GameResourceManifestSources, FallbackValue={x:Null}}"
+                                          SelectedItem="{Binding SelectedGameResourceManifestSource, Mode=TwoWay, FallbackValue={x:Null}}"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          Background="White"
+                                          Height="220"
+                                          EnableRowVirtualization="True"
+                                          EnableColumnVirtualization="True"
+                                          VirtualizingPanel.IsVirtualizing="True"
+                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="#" Binding="{Binding Order, Mode=OneWay, FallbackValue=''}" Width="48" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="链接" Binding="{Binding Url, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" Width="*" />
+                                        <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=True}" Width="80" />
+                                        <DataGridTemplateColumn Header="操作" Width="90">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Button Content="删除"
+                                                            Padding="8,3"
+                                                            Margin="0"
+                                                            Command="{Binding DataContext.RemoveGameResourceManifestSourceCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                            CommandParameter="{Binding}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
                         </Border>
 
                         <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16">
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
-                                    <Button Content="测试连通性" Command="{Binding TestConnectivityCommand}" ToolTip="测试 jsDelivr CDN、GitHub API 和 GitHub Raw 是否可访问，不会下载完整 ZIP。" />
+                                    <Button Content="测试连通性" Command="{Binding TestConnectivityCommand}" ToolTip="测试 GitHub DNS、GitHub API 以及资源清单源是否可访问，不会下载完整 ZIP。" />
                                     <TextBlock Text="{Binding ConnectivityStateText, FallbackValue='未测试'}" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="#4B5563" />
                                 </StackPanel>
 

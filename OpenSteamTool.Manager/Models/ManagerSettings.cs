@@ -1,15 +1,17 @@
 namespace OpenSteamTool.Manager.Models;
 
-public enum NetworkSourcePriority
-{
-    CdnFirst = 0,
-    GitHubFirst = 1
-}
-
 public sealed class ManagerSettings
 {
-    public NetworkSourcePriority NetworkSourcePriority { get; set; } = NetworkSourcePriority.CdnFirst;
+    public bool GitHubDnsOptimizationEnabled { get; set; } = true;
+    public List<GameResourceManifestSource> GameResourceManifestSources { get; set; } = new();
     public DateTimeOffset? LastSavedAtUtc { get; set; }
+}
+
+public sealed class GameResourceManifestSource
+{
+    public int Order { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class ConnectivityTestResult
