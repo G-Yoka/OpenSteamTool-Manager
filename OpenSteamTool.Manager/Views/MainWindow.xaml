@@ -297,6 +297,60 @@
                 </DockPanel>
             </TabItem>
 
+            <TabItem Header="设置">
+                <ScrollViewer Margin="0,16,0,0">
+                    <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Text="OpenSteamTool 设置" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock Text="这些设置只影响管理器本身的更新与游戏资源下载，不会修改 OpenSteamTool DLL 或 Steam 配置。" Margin="0,8,0,18" Foreground="#4B5563" TextWrapping="Wrap" />
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="网络来源优先级" Foreground="#6B7280" />
+                                <ComboBox Width="320"
+                                          HorizontalAlignment="Left"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding SelectedNetworkSourcePriority, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=CdnFirst}"
+                                          ToolTip="控制更新检查、更新包下载、游戏资源清单和资源 ZIP 的首选来源。失败时仍会自动回退备用来源。">
+                                    <ComboBoxItem Content="jsDelivr CDN 优先" Tag="CdnFirst" />
+                                    <ComboBoxItem Content="GitHub Releases 优先" Tag="GitHubFirst" />
+                                </ComboBox>
+                                <TextBlock Text="{Binding NetworkSourceStateText, FallbackValue=''}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding SettingsSavedText, FallbackValue=''}" Margin="0,4,0,0" Foreground="#6B7280" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="White" BorderBrush="#D7DAE0" BorderThickness="1" Padding="16">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                                    <Button Content="测试连通性" Command="{Binding TestConnectivityCommand}" ToolTip="测试 jsDelivr CDN、GitHub API 和 GitHub Raw 是否可访问，不会下载完整 ZIP。" />
+                                    <TextBlock Text="{Binding ConnectivityStateText, FallbackValue='未测试'}" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="#4B5563" />
+                                </StackPanel>
+
+                                <DataGrid ItemsSource="{Binding ConnectivityResults, FallbackValue={x:Null}}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          Background="White"
+                                          Height="260"
+                                          EnableRowVirtualization="True"
+                                          EnableColumnVirtualization="True"
+                                          VirtualizingPanel.IsVirtualizing="True"
+                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="来源" Binding="{Binding Source, Mode=OneWay, FallbackValue=''}" Width="140" />
+                                        <DataGridTextColumn Header="用途" Binding="{Binding Purpose, Mode=OneWay, FallbackValue=''}" Width="150" />
+                                        <DataGridTextColumn Header="状态" Binding="{Binding Status, Mode=OneWay, FallbackValue=''}" Width="220" />
+                                        <DataGridTextColumn Header="耗时" Binding="{Binding DurationText, Mode=OneWay, FallbackValue=''}" Width="90" />
+                                        <DataGridTextColumn Header="地址 / 详情" Binding="{Binding Detail, Mode=OneWay, FallbackValue=''}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="关于">
                 <ScrollViewer Margin="0,16,0,0">
                     <StackPanel MaxWidth="860" HorizontalAlignment="Left">

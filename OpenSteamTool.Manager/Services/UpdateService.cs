@@ -20,12 +20,14 @@ public sealed class UpdateService
 
     private readonly GitHubHttpService github;
     private readonly CdnService cdn;
+    private readonly ManagerSettingsService settings;
     private readonly Version currentVersion;
 
-    public UpdateService(GitHubHttpService github, CdnService cdn)
+    public UpdateService(GitHubHttpService github, CdnService cdn, ManagerSettingsService settings)
     {
         this.github = github;
         this.cdn = cdn;
+        this.settings = settings;
         currentVersion = ReadCurrentVersion();
     }
 
@@ -37,13 +39,19 @@ public sealed class UpdateService
 
     public async Task<UpdateCheckResult> CheckLatestAsync(CancellationToken cancellationToken = default)
     {
-        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
-        if (cdnResult is not null)
+        if (settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst)
         {
-            return cdnResult;
+            var githubResult = await CheckLatestFromGitHubAsync(cancellationToken);
+            if (githubResult.HasRelease && githubResult.ErrorMessage is null)
+            {
+                return await AddCdnMirrorIfAvailableAsync(githubResult, cancellationToken);
+            }
+
+            return await TryLoadLatestFromCdnAsync(cancellationToken) ?? githubResult;
         }
 
-        return await CheckLatestFromGitHubAsync(cancellationToken);
+        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
+        return cdnResult ?? await CheckLatestFromGitHubAsync(cancellationToken);
     }
 
     public async Task StartSelfUpdateAsync(
@@ -55,12 +63,12 @@ public sealed class UpdateService
     {
         if (!release.HasRelease)
         {
-            throw new InvalidOperationException("No public release is available for auto update.");
+            throw new InvalidOperationException("没有可用于自动更新的公开 Release。");
         }
 
         if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
         {
-            throw new InvalidOperationException("This release does not provide a downloadable ZIP asset.");
+            throw new InvalidOperationException("该 Release 没有可下载的 ZIP 发布包。");
         }
 
         var workDir = Path.Combine(Path.GetTempPath(), "OpenSteamTool.Manager", "update", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
@@ -73,7 +81,7 @@ public sealed class UpdateService
         var zipPath = Path.Combine(downloadDir, zipName);
         var sourceRoot = await DownloadAssetWithFallbackAsync(release.AssetDownloadUrl, release.AssetMirrorUrl, zipPath, progress, cancellationToken);
 
-        progress?.Report(new UpdateProgress { Stage = "Extracting", Percent = 0, Message = "Preparing update files..." });
+        progress?.Report(new UpdateProgress { Stage = "解压中", Percent = 0, Message = "正在准备更新文件..." });
         ZipFile.ExtractToDirectory(sourceRoot, extractDir, overwriteFiles: true);
 
         var payloadRoot = ResolvePayloadRoot(extractDir);
@@ -82,7 +90,7 @@ public sealed class UpdateService
 
         await File.WriteAllTextAsync(updateScript, BuildScript(), new UTF8Encoding(false), cancellationToken);
         StartHelperProcess(updateScript, payloadRoot, installDirectory, exeName, processId);
-        progress?.Report(new UpdateProgress { Stage = "Replacing", Percent = 100, Message = "Update helper started; the app will replace files and restart after exit." });
+        progress?.Report(new UpdateProgress { Stage = "替换中", Percent = 100, Message = "更新辅助进程已启动，主程序退出后将自动替换并重启。" });
     }
 
     private async Task<UpdateCheckResult?> TryLoadLatestFromCdnAsync(CancellationToken cancellationToken)
@@ -98,12 +106,7 @@ public sealed class UpdateService
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var metadata = await JsonSerializer.DeserializeAsync<CdnUpdateMetadata>(stream, JsonOptions, cancellationToken);
-            if (metadata is null)
-            {
-                return null;
-            }
-
-            return BuildResultFromMetadata(metadata);
+            return metadata is null ? null : BuildResultFromMetadata(metadata);
         }
         catch (OperationCanceledException)
         {
@@ -113,6 +116,35 @@ public sealed class UpdateService
         {
             return null;
         }
+    }
+
+    private async Task<UpdateCheckResult> AddCdnMirrorIfAvailableAsync(UpdateCheckResult result, CancellationToken cancellationToken)
+    {
+        var cdnResult = await TryLoadLatestFromCdnAsync(cancellationToken);
+        if (cdnResult is null
+            || cdnResult.LatestVersion is null
+            || result.LatestVersion is null
+            || cdnResult.LatestVersion != result.LatestVersion
+            || string.IsNullOrWhiteSpace(cdnResult.AssetDownloadUrl))
+        {
+            return result;
+        }
+
+        return new UpdateCheckResult
+        {
+            CurrentVersion = result.CurrentVersion,
+            LatestVersion = result.LatestVersion,
+            ReleaseName = result.ReleaseName,
+            ReleaseTag = result.ReleaseTag,
+            PublishedAt = result.PublishedAt,
+            ReleasePageUrl = result.ReleasePageUrl,
+            AssetName = result.AssetName,
+            AssetDownloadUrl = result.AssetDownloadUrl,
+            AssetMirrorUrl = cdnResult.AssetDownloadUrl,
+            HasRelease = result.HasRelease,
+            IsUpdateAvailable = result.IsUpdateAvailable,
+            ErrorMessage = result.ErrorMessage
+        };
     }
 
     private UpdateCheckResult? BuildResultFromMetadata(CdnUpdateMetadata metadata)
@@ -153,7 +185,7 @@ public sealed class UpdateService
 
     private async Task<UpdateCheckResult> CheckLatestFromGitHubAsync(CancellationToken cancellationToken)
     {
-        var apiUrl = "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1";
+        const string apiUrl = "https://api.github.com/repos/G-Yoka/OpenSteamTool-Manager/releases?per_page=1";
 
         try
         {
@@ -167,7 +199,7 @@ public sealed class UpdateService
 
             if (!response.IsSuccessStatusCode)
             {
-                return CreateFailureResult(await github.BuildFailureMessageAsync(response, "GitHub Releases API request failed", cancellationToken));
+                return CreateFailureResult(await github.BuildFailureMessageAsync(response, "GitHub Releases API 请求失败", cancellationToken));
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -191,7 +223,7 @@ public sealed class UpdateService
                     ReleaseTag = release.TagName ?? string.Empty,
                     PublishedAt = release.PublishedAt,
                     ReleasePageUrl = release.HtmlUrl ?? ReleasesUrl,
-                    ErrorMessage = $"Release tag {release.TagName} cannot be parsed as a SemVer version."
+                    ErrorMessage = $"Release 标签 {release.TagName} 不是有效的 SemVer 版本号。"
                 };
             }
 
@@ -244,12 +276,7 @@ public sealed class UpdateService
         }
 
         var trimmed = tagName.Trim().TrimStart('v', 'V');
-        if (Version.TryParse(trimmed, out var version))
-        {
-            return Normalize(version);
-        }
-
-        return null;
+        return Version.TryParse(trimmed, out var version) ? Normalize(version) : null;
     }
 
     private static Version Normalize(Version version)
@@ -292,11 +319,13 @@ public sealed class UpdateService
             var url = candidates[index];
             try
             {
-                using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders: false);
+                var includeGitHubHeaders = Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                    && uri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase);
+                using var request = github.CreateRequest(HttpMethod.Get, url, "application/octet-stream", includeGitHubHeaders);
                 using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    var message = await github.BuildFailureMessageAsync(response, "Update package download failed", cancellationToken, includeRateLimitDetails: false);
+                    var message = await github.BuildFailureMessageAsync(response, "更新包下载失败", cancellationToken, includeRateLimitDetails: false);
                     throw new InvalidOperationException(message);
                 }
 
@@ -314,21 +343,20 @@ public sealed class UpdateService
 
                     if (totalLength is > 0)
                     {
-                        var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
                         progress?.Report(new UpdateProgress
                         {
-                            Stage = "Downloading",
-                            Percent = percent,
-                            Message = $"{percent}%"
+                            Stage = "下载中",
+                            Percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100),
+                            Message = "正在下载更新包..."
                         });
                     }
                 }
 
                 progress?.Report(new UpdateProgress
                 {
-                    Stage = "Downloading",
+                    Stage = "下载中",
                     Percent = 100,
-                    Message = "Update package download completed."
+                    Message = "更新包下载完成。"
                 });
 
                 return zipPath;
@@ -340,15 +368,15 @@ public sealed class UpdateService
                 {
                     progress?.Report(new UpdateProgress
                     {
-                        Stage = "Downloading",
+                        Stage = "下载中",
                         Percent = 0,
-                        Message = "CDN 下载失败，正在尝试备用地址..."
+                        Message = "首选下载源失败，正在尝试备用地址..."
                     });
                 }
             }
         }
 
-        throw new InvalidOperationException(lastFailure?.Message ?? "Update package download failed.");
+        throw new InvalidOperationException(lastFailure?.Message ?? "更新包下载失败。");
     }
 
     private static string ResolvePayloadRoot(string extractDir)
@@ -401,7 +429,7 @@ public sealed class UpdateService
         startInfo.ArgumentList.Add("-ProcessId");
         startInfo.ArgumentList.Add(processId.ToString());
 
-        using var helper = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start update helper process.");
+        using var helper = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动更新辅助进程。");
     }
 
     private static Version ReadCurrentVersion()
@@ -437,19 +465,19 @@ while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
 }
 
 if (-not (Test-Path -LiteralPath $Source)) {
-    throw "Update source directory not found: $Source"
+    throw "更新源目录不存在：$Source"
 }
 
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
 
 & "$env:SystemRoot\System32\robocopy.exe" $Source $Target /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) {
-    throw "Robocopy failed with exit code $LASTEXITCODE"
+    throw "Robocopy 复制失败，退出码：$LASTEXITCODE"
 }
 
 $exePath = Join-Path $Target $ExeName
 if (-not (Test-Path -LiteralPath $exePath)) {
-    throw "Updated executable not found: $exePath"
+    throw "更新后的可执行文件不存在：$exePath"
 }
 
 Start-Process -FilePath $exePath -WorkingDirectory $Target | Out-Null
@@ -495,14 +523,9 @@ Start-Process -FilePath $exePath -WorkingDirectory $Target | Out-Null
     {
         public UriSafe(string value)
         {
-            if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value, UriKind.Absolute, out var uri))
-            {
-                Value = new Uri("https://example.invalid/");
-            }
-            else
-            {
-                Value = uri;
-            }
+            Value = !string.IsNullOrWhiteSpace(value) && Uri.TryCreate(value, UriKind.Absolute, out var uri)
+                ? uri
+                : new Uri("https://example.invalid/");
         }
 
         public Uri Value { get; }

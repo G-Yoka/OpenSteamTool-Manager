@@ -41,12 +41,12 @@ public sealed class GamePackageInstallService
 
         if (string.IsNullOrWhiteSpace(package.ZipUrl))
         {
-            throw new InvalidOperationException("Package zip url cannot be empty.");
+            throw new InvalidOperationException("资源包 ZIP 地址不能为空。");
         }
 
         if (string.IsNullOrWhiteSpace(package.Sha256))
         {
-            throw new InvalidOperationException("Package SHA-256 cannot be empty.");
+            throw new InvalidOperationException("资源包 SHA-256 不能为空。");
         }
 
         var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
@@ -65,16 +65,16 @@ public sealed class GamePackageInstallService
             var zipName = GetArchiveName(package);
             var zipPath = Path.Combine(downloadDir, zipName);
 
-            progress?.Report(new UpdateProgress { Stage = "downloading", Percent = 0, Message = $"Downloading {package.Name}..." });
+            progress?.Report(new UpdateProgress { Stage = "下载中", Percent = 0, Message = $"正在下载 {package.Name}..." });
             await DownloadFileWithFallbackAsync(package.ZipUrl, package.OriginalZipUrl, zipPath, progress, cancellationToken);
 
             var downloadedHash = ComputeSha256(zipPath);
             if (!string.Equals(downloadedHash, package.Sha256, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException($"Package hash mismatch. expected {package.Sha256}, actual {downloadedHash}.");
+                throw new InvalidOperationException($"资源包哈希不匹配。期望 {package.Sha256}，实际 {downloadedHash}。");
             }
 
-            progress?.Report(new UpdateProgress { Stage = "extracting", Percent = 0, Message = "Extracting package..." });
+            progress?.Report(new UpdateProgress { Stage = "解压中", Percent = 0, Message = "正在解压资源包..." });
             ExtractZipSafely(zipPath, stageDir);
 
             var installRoot = ResolveInstallRoot(game.InstallPath, package.TargetRelativePath);
@@ -95,11 +95,11 @@ public sealed class GamePackageInstallService
                 InstalledAtUtc = DateTimeOffset.UtcNow
             };
 
-            progress?.Report(new UpdateProgress { Stage = "installing", Percent = 0, Message = "Copying files to game folder..." });
+            progress?.Report(new UpdateProgress { Stage = "安装中", Percent = 0, Message = "正在复制文件到游戏目录..." });
             CopyStagedFiles(stageDir, installRoot, backupDir, record, progress);
 
             await SaveRecordAsync(record, recordDir, cancellationToken);
-            progress?.Report(new UpdateProgress { Stage = "done", Percent = 100, Message = "Package installed." });
+            progress?.Report(new UpdateProgress { Stage = "完成", Percent = 100, Message = "资源包安装完成。" });
             return record;
         }
         catch
@@ -279,7 +279,7 @@ public sealed class GamePackageInstallService
 
             progress?.Report(new UpdateProgress
             {
-                Stage = "installing",
+                Stage = "安装中",
                 Percent = (int)Math.Clamp(((index + 1) * 100L) / total, 0, 100),
                 Message = relativePath
             });
@@ -314,7 +314,7 @@ public sealed class GamePackageInstallService
                 using var response = await github.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    var message = await github.BuildFailureMessageAsync(response, "Resource package download failed", cancellationToken, includeRateLimitDetails: false);
+                    var message = await github.BuildFailureMessageAsync(response, "资源包下载失败", cancellationToken, includeRateLimitDetails: false);
                     throw new InvalidOperationException(message);
                 }
 
@@ -335,9 +335,9 @@ public sealed class GamePackageInstallService
                         var percent = (int)Math.Clamp(readTotal * 100L / totalLength.Value, 0, 100);
                         progress?.Report(new UpdateProgress
                         {
-                            Stage = "downloading",
+                            Stage = "下载中",
                             Percent = percent,
-                            Message = $"{percent}%"
+                            Message = "正在下载资源包..."
                         });
                     }
                 }
@@ -351,7 +351,7 @@ public sealed class GamePackageInstallService
                 {
                     progress?.Report(new UpdateProgress
                     {
-                        Stage = "downloading",
+                        Stage = "下载中",
                         Percent = 0,
                         Message = "CDN 下载失败，正在尝试备用地址..."
                     });
@@ -359,7 +359,7 @@ public sealed class GamePackageInstallService
             }
         }
 
-        throw new InvalidOperationException(lastFailure?.Message ?? "Resource package download failed.");
+        throw new InvalidOperationException(lastFailure?.Message ?? "资源包下载失败。");
     }
 
     private static void ExtractZipSafely(string zipPath, string stageDir)

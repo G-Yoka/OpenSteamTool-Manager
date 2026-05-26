@@ -27,13 +27,17 @@ public partial class MainViewModel : ViewModelBase
     private readonly ITextPromptService _prompts;
     private readonly ISecretPromptService _secretPrompts;
     private readonly GitHubTokenService _githubToken;
+    private readonly ManagerSettingsService _settings;
+    private readonly ConnectivityTestService _connectivity;
     private UpdateCheckResult? _latestUpdate;
     private bool _loadingGameResources;
+    private bool _loadingSettings;
 
     public ObservableCollection<DllInstallStatus> DllStatuses { get; } = new();
     public ObservableCollection<GameLuaConfig> Games { get; } = new();
     public ObservableCollection<SteamGameInfo> SteamGames { get; } = new();
     public ObservableCollection<GitHubGamePackage> GamePackages { get; } = new();
+    public ObservableCollection<ConnectivityTestResult> ConnectivityResults { get; } = new();
 
     [ObservableProperty]
     private string steamPath = string.Empty;
@@ -79,6 +83,18 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string gitHubTokenStateText = string.Empty;
+
+    [ObservableProperty]
+    private string selectedNetworkSourcePriority = NetworkSourcePriority.CdnFirst.ToString();
+
+    [ObservableProperty]
+    private string networkSourceStateText = string.Empty;
+
+    [ObservableProperty]
+    private string settingsSavedText = string.Empty;
+
+    [ObservableProperty]
+    private string connectivityStateText = "未测试";
 
     [ObservableProperty]
     private string logsText = string.Empty;
@@ -156,7 +172,9 @@ public partial class MainViewModel : ViewModelBase
         IDialogService dialogs,
         ITextPromptService prompts,
         ISecretPromptService secretPrompts,
-        GitHubTokenService githubToken)
+        GitHubTokenService githubToken,
+        ManagerSettingsService settings,
+        ConnectivityTestService connectivity)
     {
         _locator = locator;
         _process = process;
@@ -173,12 +191,15 @@ public partial class MainViewModel : ViewModelBase
         _prompts = prompts;
         _secretPrompts = secretPrompts;
         _githubToken = githubToken;
+        _settings = settings;
+        _connectivity = connectivity;
     }
 
     public async Task InitializeAsync()
     {
         SteamPath = _locator.LoadLastPath();
         AppVersionText = _updates.CurrentVersionText;
+        LoadSettingsToFields();
         UpdateGitHubTokenState();
         _ = RefreshLatestUpdateAsync();
         await ExecuteBusyAsync("正在加载状态...", () => RefreshStateAsync());
@@ -230,6 +251,23 @@ public partial class MainViewModel : ViewModelBase
             _githubToken.ClearToken();
             UpdateGitHubTokenState();
             await Task.CompletedTask;
+        });
+
+    [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
+    private async Task TestConnectivityAsync()
+        => await ExecuteBusyAsync("正在测试连通性...", async () =>
+        {
+            ConnectivityStateText = "测试中";
+            ConnectivityResults.Clear();
+
+            var results = await _connectivity.TestAsync();
+            foreach (var result in results)
+            {
+                ConnectivityResults.Add(result);
+            }
+
+            var available = results.Count(x => x.Status.StartsWith("可访问", StringComparison.OrdinalIgnoreCase));
+            ConnectivityStateText = $"{available}/{results.Count} 可访问";
         });
 
     [RelayCommand(CanExecute = nameof(CanExecuteWhenIdle))]
@@ -346,12 +384,17 @@ public partial class MainViewModel : ViewModelBase
             UpdateProgressText = string.Empty;
             UpdateSummaryText();
 
-            var launched = false;
             var progress = new Progress<UpdateProgress>(value =>
             {
-                UpdateStateText = value.Stage;
+                if (!string.IsNullOrWhiteSpace(value.Stage))
+                {
+                    UpdateStateText = value.Stage;
+                }
                 UpdateProgressText = value.Percent > 0 ? $"{value.Percent}%" : string.Empty;
-                UpdateDetailText = value.Message;
+                if (!string.IsNullOrWhiteSpace(value.Message))
+                {
+                    UpdateDetailText = value.Message;
+                }
                 UpdateSummaryText();
             });
 
@@ -360,17 +403,12 @@ public partial class MainViewModel : ViewModelBase
                 AppContext.BaseDirectory,
                 Environment.ProcessId,
                 progress);
-            launched = true;
 
             UpdateStateText = "替换中";
             UpdateProgressText = string.Empty;
             UpdateDetailText = "更新器已启动，主程序退出后将自动替换并重启。";
             UpdateSummaryText();
-
-            if (launched)
-            {
-                _appControl.Shutdown();
-            }
+            _appControl.Shutdown();
         });
 
     [RelayCommand]
@@ -667,6 +705,44 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateGitHubTokenState()
         => GitHubTokenStateText = _githubToken.HasToken ? "GitHub 令牌：已配置" : "GitHub 令牌：未配置";
+
+    private void LoadSettingsToFields()
+    {
+        var settings = _settings.Current;
+        _loadingSettings = true;
+        try
+        {
+            SelectedNetworkSourcePriority = settings.NetworkSourcePriority.ToString();
+            UpdateNetworkSourceState(settings);
+        }
+        finally
+        {
+            _loadingSettings = false;
+        }
+    }
+
+    private void SaveNetworkSourcePriority(string value)
+    {
+        if (!Enum.TryParse<NetworkSourcePriority>(value, out var priority))
+        {
+            priority = NetworkSourcePriority.CdnFirst;
+        }
+
+        _settings.SetNetworkSourcePriority(priority);
+        _gamePackages.ClearCache();
+        _latestUpdate = null;
+        UpdateNetworkSourceState(_settings.Current);
+    }
+
+    private void UpdateNetworkSourceState(ManagerSettings settings)
+    {
+        NetworkSourceStateText = settings.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst
+            ? "当前优先使用 GitHub Releases / GitHub 原始地址，失败时回退 jsDelivr CDN。"
+            : "当前优先使用 jsDelivr CDN，失败时回退 GitHub。";
+        SettingsSavedText = settings.LastSavedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") is { } savedAt
+            ? $"最后保存：{savedAt}"
+            : "使用默认设置";
+    }
 
     private void ApplyUpdateResult(UpdateCheckResult result)
     {
@@ -1020,6 +1096,16 @@ public partial class MainViewModel : ViewModelBase
     partial void OnSelectedGamePackageChanged(GitHubGamePackage? value)
         => NotifyCommandStates();
 
+    partial void OnSelectedNetworkSourcePriorityChanged(string value)
+    {
+        if (_loadingSettings)
+        {
+            return;
+        }
+
+        SaveNetworkSourcePriority(value);
+    }
+
     private void NotifyCommandStates()
     {
         ChooseSteamPathCommand.NotifyCanExecuteChanged();
@@ -1035,6 +1121,7 @@ public partial class MainViewModel : ViewModelBase
         OpenReleasePageCommand.NotifyCanExecuteChanged();
         SetGitHubTokenCommand.NotifyCanExecuteChanged();
         ClearGitHubTokenCommand.NotifyCanExecuteChanged();
+        TestConnectivityCommand.NotifyCanExecuteChanged();
         AddGameCommand.NotifyCanExecuteChanged();
         ImportGameCommand.NotifyCanExecuteChanged();
         SaveGameCommand.NotifyCanExecuteChanged();

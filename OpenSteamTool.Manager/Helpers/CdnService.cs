@@ -24,6 +24,9 @@ public sealed class CdnService
     public string BuildGameResourcesCdnUrl(string relativePath)
         => BuildCdnUrl(GameResourcesOwner, GameResourcesRepository, relativePath);
 
+    public string BuildGameResourcesRawUrl(string relativePath)
+        => BuildRawUrl(GameResourcesOwner, GameResourcesRepository, relativePath);
+
     public string ResolveGameResourceZipUrl(string? zipUrl, string? zipPath, out string? mirrorUrl)
     {
         mirrorUrl = null;
@@ -128,5 +131,11 @@ public sealed class CdnService
     {
         var cleanPath = relativePath.Replace('\\', '/').TrimStart('/');
         return $"https://cdn.jsdelivr.net/gh/{owner}/{repository}@{branch}/{cleanPath}";
+    }
+
+    private static string BuildRawUrl(string owner, string repository, string relativePath)
+    {
+        var cleanPath = relativePath.Replace('\\', '/').TrimStart('/');
+        return $"https://raw.githubusercontent.com/{owner}/{repository}/{DefaultBranch}/{cleanPath}";
     }
 }

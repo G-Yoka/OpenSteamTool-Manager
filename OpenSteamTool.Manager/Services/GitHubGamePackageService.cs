@@ -1,4 +1,3 @@
-using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using OpenSteamTool.Manager.Helpers;
@@ -15,19 +14,23 @@ public sealed class GitHubGamePackageService
 
     private readonly GitHubHttpService github;
     private readonly CdnService cdn;
+    private readonly ManagerSettingsService settings;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
     private GamePackageManifest? _cachedManifest;
     private DateTimeOffset _cachedAt;
 
-    public GitHubGamePackageService(GitHubHttpService github, CdnService cdn)
+    public GitHubGamePackageService(GitHubHttpService github, CdnService cdn, ManagerSettingsService settings)
     {
         this.github = github;
         this.cdn = cdn;
+        this.settings = settings;
     }
 
     public string RepositoryUrl => $"https://github.com/{CdnService.GameResourcesOwner}/{CdnService.GameResourcesRepository}";
 
-    public string ManifestUrl => cdn.GameResourcesManifestUrl;
+    public string ManifestUrl => settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst
+        ? cdn.GameResourcesFallbackManifestUrl
+        : cdn.GameResourcesManifestUrl;
 
     public async Task<GamePackageManifest> LoadManifestAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
@@ -45,28 +48,12 @@ public sealed class GitHubGamePackageService
             }
 
             var errors = new List<string>();
-            var manifestResult = await LoadManifestFromUrlAsync(cdn.GameResourcesManifestUrl, includeGitHubHeaders: false, cancellationToken);
-            if (manifestResult.Manifest is null && !string.IsNullOrWhiteSpace(manifestResult.Error))
-            {
-                errors.Add($"CDN: {manifestResult.Error}");
-            }
-
-            if (manifestResult.Manifest is null)
-            {
-                var fallbackResult = await LoadManifestFromUrlAsync(cdn.GameResourcesFallbackManifestUrl, includeGitHubHeaders: false, cancellationToken);
-                if (fallbackResult.Manifest is null && !string.IsNullOrWhiteSpace(fallbackResult.Error))
-                {
-                    errors.Add($"GitHub: {fallbackResult.Error}");
-                }
-
-                manifestResult = fallbackResult;
-            }
-
+            var manifestResult = await LoadManifestByPriorityAsync(errors, cancellationToken);
             var manifest = manifestResult.Manifest;
             if (manifest is null)
             {
                 throw new InvalidOperationException(errors.Count == 0
-                    ? $"Unable to load manifest from {ManifestUrl}."
+                    ? $"无法从 {ManifestUrl} 读取游戏资源清单。"
                     : string.Join("；", errors));
             }
 
@@ -100,6 +87,40 @@ public sealed class GitHubGamePackageService
         _cachedAt = default;
     }
 
+    private async Task<(GamePackageManifest? Manifest, string? Error)> LoadManifestByPriorityAsync(
+        List<string> errors,
+        CancellationToken cancellationToken)
+    {
+        var preferGitHub = settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst;
+        var candidates = preferGitHub
+            ? new[]
+            {
+                ("GitHub Raw", cdn.GameResourcesFallbackManifestUrl, false),
+                ("jsDelivr CDN", cdn.GameResourcesManifestUrl, false)
+            }
+            : new[]
+            {
+                ("jsDelivr CDN", cdn.GameResourcesManifestUrl, false),
+                ("GitHub Raw", cdn.GameResourcesFallbackManifestUrl, false)
+            };
+
+        foreach (var (name, url, includeGitHubHeaders) in candidates)
+        {
+            var result = await LoadManifestFromUrlAsync(url, includeGitHubHeaders, cancellationToken);
+            if (result.Manifest is not null)
+            {
+                return result;
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                errors.Add($"{name}: {result.Error}");
+            }
+        }
+
+        return (null, null);
+    }
+
     private async Task<(GamePackageManifest? Manifest, string? Error)> LoadManifestFromUrlAsync(
         string url,
         bool includeGitHubHeaders,
@@ -112,14 +133,14 @@ public sealed class GitHubGamePackageService
 
             if (!response.IsSuccessStatusCode)
             {
-                return (null, await github.BuildFailureMessageAsync(response, "Manifest request failed", cancellationToken, includeGitHubHeaders));
+                return (null, await github.BuildFailureMessageAsync(response, "资源清单请求失败", cancellationToken, includeGitHubHeaders));
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var manifest = await JsonSerializer.DeserializeAsync<GamePackageManifest>(stream, JsonOptions, cancellationToken);
             if (manifest is null)
             {
-                return (null, "Manifest content is empty or invalid.");
+                return (null, "资源清单为空或格式无效。");
             }
 
             manifest.Items ??= new List<GitHubGamePackage>();
@@ -133,15 +154,34 @@ public sealed class GitHubGamePackageService
 
     private void NormalizePackages(GamePackageManifest manifest)
     {
+        var preferGitHub = settings.Current.NetworkSourcePriority == NetworkSourcePriority.GitHubFirst;
         foreach (var item in manifest.Items)
         {
-            item.OriginalZipUrl = item.ZipUrl?.Trim() ?? string.Empty;
-            var resolved = cdn.ResolveGameResourceZipUrl(item.ZipUrl, item.ZipPath, out var mirrorUrl);
-            item.ZipUrl = resolved;
+            var originalUrl = item.ZipUrl?.Trim() ?? string.Empty;
+            var cdnUrl = cdn.ResolveGameResourceZipUrl(item.ZipUrl, item.ZipPath, out var mirrorUrl);
+
+            if (preferGitHub && !string.IsNullOrWhiteSpace(originalUrl))
+            {
+                item.ZipUrl = originalUrl;
+                item.OriginalZipUrl = !string.Equals(originalUrl, cdnUrl, StringComparison.OrdinalIgnoreCase)
+                    ? cdnUrl
+                    : mirrorUrl ?? string.Empty;
+                continue;
+            }
+
+            if (preferGitHub && !string.IsNullOrWhiteSpace(item.ZipPath))
+            {
+                item.ZipUrl = cdn.BuildGameResourcesRawUrl(item.ZipPath);
+                item.OriginalZipUrl = cdnUrl;
+                continue;
+            }
+
+            item.ZipUrl = cdnUrl;
+            item.OriginalZipUrl = originalUrl;
 
             if (string.IsNullOrWhiteSpace(item.OriginalZipUrl) && !string.IsNullOrWhiteSpace(mirrorUrl))
             {
-                item.OriginalZipUrl = mirrorUrl!;
+                item.OriginalZipUrl = mirrorUrl;
             }
         }
     }

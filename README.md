@@ -2,7 +2,7 @@
 
 OpenSteamTool Manager 是一个基于 `.NET 8 WPF` 的 Windows 桌面管理器，用来管理 Steam 根目录中的 OpenSteamTool 相关文件、Lua 配置、日志、游戏资源包，以及应用自身更新。
 
-当前版本：`v0.1.4`
+当前版本：`v0.1.5`
 
 ## 主要功能
 
