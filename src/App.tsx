@@ -22,11 +22,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import {
   closeSteam,
   closeWindow,
+  checkGithubRelease,
   deleteGame,
   detectSteamDir,
   fetchAppMetadata,
@@ -47,7 +50,7 @@ import {
   upsertGame,
 } from "./api";
 import yokaStarMoonFlower from "./assets/yoka-star-moon-flower.png";
-import type { AppIdEntry, DllStatus, GameConfig, LogFile, ManagerSettings, ScanState } from "./types";
+import type { AppIdEntry, DllStatus, GameConfig, GitHubReleaseInfo, LogFile, ManagerSettings, ScanState } from "./types";
 
 type Tab = "overview" | "lua" | "dll" | "settings" | "logs" | "about";
 type Busy = "idle" | "loading" | "saving" | "working";
@@ -81,7 +84,8 @@ const defaultSettings: ManagerSettings = {
 const CANVAS_WIDTH = 1260;
 const CANVAS_HEIGHT = 800;
 const APP_VERSION = "0.2.0";
-const PROJECT_URL = "https://github.com/G-Yoka/OpenSteamTool-Manager";
+const PROJECT_URL = "https://github.com/G-Yoka/G-OpenSteamTool";
+const DNS_SETTING_KEY = "gost.githubDnsOptimization";
 const hasTauriRuntime = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const initialConsole: ConsoleState = {
@@ -114,6 +118,7 @@ function App() {
   const [selectedLog, setSelectedLog] = useState("");
   const [gameForm, setGameForm] = useState<GameConfig>(emptyGame);
   const [luaPathsText, setLuaPathsText] = useState("");
+  const [githubDnsOptimization, setGithubDnsOptimization] = useState(() => window.localStorage.getItem(DNS_SETTING_KEY) === "1");
   const [consoleState, setConsoleState] = useState<ConsoleState>(initialConsole);
   const [busy, setBusy] = useState<Busy>("idle");
 
@@ -140,6 +145,10 @@ function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(DNS_SETTING_KEY, githubDnsOptimization ? "1" : "0");
+  }, [githubDnsOptimization]);
 
   async function boot() {
     setBusy("loading");
@@ -419,13 +428,15 @@ function App() {
             <SettingsPanel
               settings={settings}
               luaPathsText={luaPathsText}
+              githubDnsOptimization={githubDnsOptimization}
               onSettings={setSettings}
               onLuaPathsText={setLuaPathsText}
+              onGithubDnsOptimization={setGithubDnsOptimization}
               onSave={saveCurrentSettings}
             />
           )}
           {tab === "logs" && (
-            <LogsPanel
+            <BetterLogsPanel
               logs={logs}
               active={activeLog}
               selected={selectedLog}
@@ -433,7 +444,7 @@ function App() {
               onRefresh={() => refreshAll()}
             />
           )}
-          {tab === "about" && <AboutPanel />}
+          {tab === "about" && <BetterAboutPanel githubDnsOptimization={githubDnsOptimization} />}
         </section>
 
         <footer className="footer">
@@ -770,14 +781,18 @@ function DllPanel({ state }: { state: ScanState | null }) {
 function SettingsPanel({
   settings,
   luaPathsText,
+  githubDnsOptimization,
   onSettings,
   onLuaPathsText,
+  onGithubDnsOptimization,
   onSave,
 }: {
   settings: ManagerSettings;
   luaPathsText: string;
+  githubDnsOptimization: boolean;
   onSettings: (settings: ManagerSettings) => void;
   onLuaPathsText: (text: string) => void;
+  onGithubDnsOptimization: (enabled: boolean) => void;
   onSave: () => void;
 }) {
   return (
@@ -811,6 +826,20 @@ function SettingsPanel({
           额外 Lua 路径 Lua Paths
           <textarea value={luaPathsText} onChange={(event) => onLuaPathsText(event.target.value)} placeholder="每行一个路径" />
         </label>
+      </div>
+      <div className="settings-option">
+        <div>
+          <strong>GitHub DNS 优化</strong>
+          <span>仅应用内 GitHub Release 检查使用 DoT；不修改系统 DNS、hosts 或代理。</span>
+        </div>
+        <button
+          className={`toggle-button ${githubDnsOptimization ? "on" : ""}`}
+          aria-pressed={githubDnsOptimization}
+          onClick={() => onGithubDnsOptimization(!githubDnsOptimization)}
+        >
+          <span />
+          {githubDnsOptimization ? "已开启" : "已关闭"}
+        </button>
       </div>
       <div className="actions-row">
         <button className="primary" onClick={onSave}>
@@ -886,7 +915,7 @@ function MiniAboutCard() {
         <div className="mini-about-detail">
           <AboutLine icon={Gauge} label="版本" value={APP_VERSION} />
           <AboutLine icon={Activity} label="作者" value="G-Yoka" />
-          <AboutLine icon={Info} label="项目地址" value="G-Yoka/OpenSteamTool-Manager" />
+          <AboutLine icon={Info} label="项目地址" value="G-Yoka/G-OpenSteamTool" />
         </div>
       </div>
       <div className="mini-about-art">
@@ -1124,6 +1153,264 @@ function stateIcon(state: string) {
   if (state === "Managed") return <CheckCircle2 className="ok-icon" size={20} />;
   if (state === "Foreign") return <ShieldAlert className="warn-icon" size={20} />;
   return <XCircle className="muted-icon" size={20} />;
+}
+
+type ParsedLogRow = {
+  raw: string;
+  time: string;
+  level: string | null;
+  message: string;
+};
+
+function BetterLogsPanel({
+  logs,
+  active,
+  selected,
+  onSelect,
+  onRefresh,
+}: {
+  logs: LogFile[];
+  active?: LogFile;
+  selected: string;
+  onSelect: (name: string) => void;
+  onRefresh: () => void;
+}) {
+  const [level, setLevel] = useState("all");
+  const [query, setQuery] = useState("");
+  const [wrap, setWrap] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const rows = useMemo(() => parseLogRows(active?.content ?? ""), [active]);
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        const levelMatched = level === "all" || row.level === level;
+        const queryMatched = !query.trim() || row.raw.toLowerCase().includes(query.trim().toLowerCase());
+        return levelMatched && queryMatched;
+      }),
+    [rows, level, query]
+  );
+
+  useEffect(() => {
+    if (autoScroll && viewerRef.current) {
+      viewerRef.current.scrollTop = viewerRef.current.scrollHeight;
+    }
+  }, [active, filteredRows.length, autoScroll]);
+
+  return (
+    <div className="two-column logs-layout">
+      <section className="panel log-files-panel">
+        <PanelTitle icon={ListChecks} title="日志文件" extra={`${logs.length} 个`} />
+        <div className="log-list">
+          {logs.map((log) => (
+            <button key={log.name} className={selected === log.name ? "active" : ""} onClick={() => onSelect(log.name)}>
+              <strong>{log.name}</strong>
+              <span>{log.line_count} 行 · {formatBytes(log.size_bytes)}</span>
+              <small>{formatLogTime(log.modified_time)}</small>
+            </button>
+          ))}
+          {logs.length === 0 && <p className="empty">暂无日志。</p>}
+        </div>
+        <button onClick={onRefresh}>
+          <RefreshCcw size={18} />
+          刷新日志
+        </button>
+      </section>
+      <section className="panel log-viewer">
+        <PanelTitle icon={Activity} title={active?.name ?? "日志内容"} extra={active ? `${filteredRows.length}/${rows.length} 行` : undefined} />
+        <div className="log-toolbar">
+          <select value={level} onChange={(event) => setLevel(event.target.value)}>
+            {["all", "trace", "debug", "info", "warn", "error"].map((item) => (
+              <option key={item} value={item}>
+                {item === "all" ? "全部" : item}
+              </option>
+            ))}
+          </select>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索日志内容" />
+          <label>
+            <input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} />
+            换行
+          </label>
+          <label>
+            <input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} />
+            滚底
+          </label>
+        </div>
+        <div className={`log-lines ${wrap ? "wrap" : ""}`} ref={viewerRef}>
+          {active ? (
+            filteredRows.map((row, index) => (
+              <div className={`log-line ${row.level ?? "plain"}`} key={`${index}-${row.raw}`}>
+                <time>{row.time || "--"}</time>
+                <span>{row.level || "log"}</span>
+                <p>{row.message}</p>
+              </div>
+            ))
+          ) : (
+            <p className="empty">选择 Steam 目录后可读取 &lt;Steam&gt;\\opensteamtool\\*.log</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function parseLogRows(content: string): ParsedLogRow[] {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const match = line.match(/^(?<time>\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?|\d{2}:\d{2}:\d{2}(?:\.\d+)?)?\s*(?:\[?(?<level>trace|debug|info|warn|warning|error|fatal)\]?)?\s*(?<message>.*)$/i);
+      const parsedLevel = match?.groups?.level?.toLowerCase() ?? null;
+      return {
+        raw: line,
+        time: match?.groups?.time ?? "",
+        level: parsedLevel === "warning" || parsedLevel === "fatal" ? (parsedLevel === "fatal" ? "error" : "warn") : parsedLevel,
+        message: match?.groups?.message?.trim() || line,
+      };
+    });
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatLogTime(value?: number | null) {
+  if (!value) return "未知时间";
+  return new Date(value * 1000).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function BetterAboutPanel({ githubDnsOptimization }: { githubDnsOptimization: boolean }) {
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState("使用 GitHub Releases 检查正式版本。");
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; date?: string | null; body?: string; available: boolean } | null>(null);
+  const [releaseInfo, setReleaseInfo] = useState<GitHubReleaseInfo | null>(null);
+  const updateRef = useRef<Update | null>(null);
+
+  async function handleCheckUpdate() {
+    setChecking(true);
+    setUpdateMessage("正在检查 GitHub Releases...");
+    setUpdateInfo(null);
+    setReleaseInfo(null);
+    updateRef.current = null;
+    try {
+      const update = hasTauriRuntime() ? await check() : null;
+      if (update?.available) {
+        updateRef.current = update;
+        setUpdateInfo({ version: update.version, date: update.date, body: update.body, available: true });
+        setUpdateMessage(`发现新版本 ${update.version}`);
+      } else {
+        setUpdateInfo({ version: APP_VERSION, available: false });
+        setUpdateMessage("当前已是最新版本。");
+      }
+    } catch (err) {
+      setUpdateMessage(`正式更新检查失败，正在使用 GitHub API 诊断：${String(err)}`);
+    }
+
+    try {
+      const release = await checkGithubRelease(githubDnsOptimization);
+      setReleaseInfo(release);
+      if (!updateRef.current && compareVersions(release.version, APP_VERSION) > 0) {
+        setUpdateInfo({ version: release.version, date: release.published_at, body: release.body, available: true });
+        setUpdateMessage(`GitHub Releases 有新版本 ${release.version}；可在 Release 页面手动下载。`);
+      }
+    } catch (err) {
+      setUpdateMessage((current) => `${current}\nGitHub API 诊断失败：${String(err)}`);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!updateRef.current) {
+      setUpdateMessage("当前没有可直接安装的 updater 包；请确认 Release 已上传 latest.json 与签名安装包。");
+      return;
+    }
+    setInstalling(true);
+    setUpdateMessage("正在下载并安装更新...");
+    try {
+      await updateRef.current.downloadAndInstall();
+      setUpdateMessage("更新已安装，点击重启应用完成切换。");
+    } catch (err) {
+      setUpdateMessage(`更新安装失败：${String(err)}`);
+    } finally {
+      setInstalling(false);
+    }
+  }
+
+  return (
+    <section className="about-page">
+      <div className="about-card">
+        <div className="about-info">
+          <PanelTitle icon={Info} title="关于 G-OpenSteamTool" />
+          <div className="about-detail-box">
+            <AboutLine icon={Gauge} label="版本" value={APP_VERSION} />
+            <AboutLine icon={Activity} label="作者" value="G-Yoka" />
+            <AboutLine icon={Info} label="项目地址" value={PROJECT_URL} link />
+          </div>
+        </div>
+        <div className="about-art">
+          <img src={yokaStarMoonFlower} alt="Yoka 星月花" />
+        </div>
+      </div>
+      <section className="panel update-panel">
+        <PanelTitle icon={Download} title="在线更新" extra={githubDnsOptimization ? "GitHub DoT 已开启" : "GitHub DoT 未开启"} />
+        <div className="update-grid">
+          <SummaryLine label="当前版本" value={APP_VERSION} />
+          <SummaryLine label="最新版本" value={updateInfo?.version ?? releaseInfo?.version ?? "未检查"} />
+          <SummaryLine label="发布时间" value={updateInfo?.date ?? releaseInfo?.published_at ?? "未知"} />
+          <SummaryLine label="Release 资源" value={releaseInfo ? `${releaseInfo.assets.length} 个` : "未读取"} />
+        </div>
+        <p className="update-message">{updateMessage}</p>
+        {(updateInfo?.body || releaseInfo?.body) && <pre className="release-notes">{trimReleaseNotes(updateInfo?.body || releaseInfo?.body || "")}</pre>}
+        {releaseInfo?.resolved_hosts?.length ? (
+          <div className="resolved-hosts">
+            {releaseInfo.resolved_hosts.map((host) => (
+              <span key={host.host}>{host.host}: {host.addresses.slice(0, 2).join(", ")}</span>
+            ))}
+          </div>
+        ) : null}
+        <div className="actions-row">
+          <button className="primary" onClick={handleCheckUpdate} disabled={checking || installing}>
+            <RefreshCcw size={18} />
+            检查更新
+          </button>
+          <button onClick={handleInstallUpdate} disabled={!updateRef.current || checking || installing}>
+            <Download size={18} />
+            下载并安装
+          </button>
+          <button onClick={() => void relaunch()} disabled={!hasTauriRuntime()}>
+            <RotateCw size={18} />
+            重启应用
+          </button>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function trimReleaseNotes(value: string) {
+  const lines = value.trim().split(/\r?\n/).slice(0, 8);
+  return lines.join("\n");
+}
+
+function compareVersions(a: string, b: string) {
+  const left = a.replace(/^v/i, "").split(/[.-]/).map((part) => Number(part) || 0);
+  const right = b.replace(/^v/i, "").split(/[.-]/).map((part) => Number(part) || 0);
+  const max = Math.max(left.length, right.length);
+  for (let index = 0; index < max; index += 1) {
+    if ((left[index] ?? 0) > (right[index] ?? 0)) return 1;
+    if ((left[index] ?? 0) < (right[index] ?? 0)) return -1;
+  }
+  return 0;
 }
 
 export default App;

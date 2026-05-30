@@ -64,4 +64,28 @@ export type AppMetadata = {
 export type LogFile = {
   name: string;
   content: string;
+  size_bytes: number;
+  modified_time?: number | null;
+  line_count: number;
+};
+
+export type GitHubReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+};
+
+export type ResolvedHost = {
+  host: string;
+  addresses: string[];
+};
+
+export type GitHubReleaseInfo = {
+  version: string;
+  name: string;
+  published_at?: string | null;
+  body: string;
+  html_url: string;
+  assets: GitHubReleaseAsset[];
+  dns_optimized: boolean;
+  resolved_hosts: ResolvedHost[];
 };

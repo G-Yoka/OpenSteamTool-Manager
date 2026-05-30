@@ -102,6 +102,16 @@ fn read_logs(steam_dir: String) -> CommandResult<Vec<manager::LogFile>> {
 }
 
 #[tauri::command]
+async fn check_github_release(dot_enabled: bool) -> CommandResult<manager::GitHubReleaseInfo> {
+    manager::check_github_release(dot_enabled).await
+}
+
+#[tauri::command]
+async fn resolve_github_domain_with_dot(host: String) -> CommandResult<Vec<String>> {
+    manager::resolve_github_domain_with_dot(&host).await
+}
+
+#[tauri::command]
 fn close_steam() -> CommandResult<()> {
     manager::close_steam()
 }
@@ -134,6 +144,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let _ = app.path().resource_dir();
             Ok(())
@@ -154,6 +166,8 @@ pub fn run() {
             set_game_enabled,
             fetch_app_metadata,
             read_logs,
+            check_github_release,
+            resolve_github_domain_with_dot,
             close_steam,
             restart_steam,
             minimize_window,

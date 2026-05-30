@@ -84,6 +84,23 @@ setManifestid(1962700, "manifest_gid_here")
 - 额外 Lua 路径
 - Pattern mirror
 
+## 在线更新与 GitHub DNS 优化
+
+关于页支持通过 GitHub Releases 检查正式版本。发布新版本时，需要在
+`G-Yoka/G-OpenSteamTool` 的 Release 中上传 Tauri updater 所需的安装包、
+签名文件和 `latest.json`。应用内会优先使用 Tauri updater 执行检查、下载和安装。
+
+设置页提供 **GitHub DNS 优化** 开关。该功能只影响应用内 GitHub Release/API
+诊断请求，使用 Cloudflare 与 Google 的 DNS over TLS 解析 GitHub 相关域名，
+不会修改系统 DNS、hosts 或代理。Tauri updater 插件自身的下载链路仍由插件网络栈处理；
+如果正式更新检查失败，应用会使用 DoT-aware GitHub API 请求给出诊断和手动下载提示。
+
+## 日志查看
+
+日志页读取 `<Steam>\opensteamtool\*.log`，并显示文件大小、行数和最后修改时间。
+日志内容会按行解析时间、等级和消息，支持等级筛选、关键词搜索、自动滚动到底部和换行显示。
+为避免大日志卡顿，应用只读取单个日志文件末尾约 80KB 内容。
+
 ## 目录结构
 
 ```text

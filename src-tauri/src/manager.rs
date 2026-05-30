@@ -6,10 +6,11 @@ use std::{
     ffi::OsStr,
     fs,
     io::Read,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     process::Command,
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::path::BaseDirectory;
 use tauri::Manager;
@@ -139,6 +140,33 @@ pub struct AppMetadata {
 pub struct LogFile {
     pub name: String,
     pub content: String,
+    pub size_bytes: u64,
+    pub modified_time: Option<u64>,
+    pub line_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubReleaseInfo {
+    pub version: String,
+    pub name: String,
+    pub published_at: Option<String>,
+    pub body: String,
+    pub html_url: String,
+    pub assets: Vec<GitHubReleaseAsset>,
+    pub dns_optimized: bool,
+    pub resolved_hosts: Vec<ResolvedHost>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubReleaseAsset {
+    pub name: String,
+    pub browser_download_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolvedHost {
+    pub host: String,
+    pub addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -556,6 +584,178 @@ pub fn fetch_app_metadata(appid: u32) -> Result<AppMetadata> {
     })
 }
 
+pub fn github_domains_for_optimization() -> Vec<&'static str> {
+    vec![
+        "github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+    ]
+}
+
+pub async fn resolve_github_domain_with_dot(host: &str) -> Result<Vec<String>> {
+    if !github_domains_for_optimization().contains(&host) {
+        return Err(format!("Unsupported GitHub host: {host}"));
+    }
+
+    let mut cloudflare = tauri::async_runtime::spawn({
+        let host = host.to_string();
+        async move { resolve_with_dot_provider(&host, true).await }
+    });
+    let mut google = tauri::async_runtime::spawn({
+        let host = host.to_string();
+        async move { resolve_with_dot_provider(&host, false).await }
+    });
+
+    tokio::select! {
+        cloudflare_result = &mut cloudflare => {
+            match cloudflare_result.map_err(|err| format!("Cloudflare DoT task failed: {err}"))? {
+                Ok(addresses) => Ok(addresses),
+                Err(first_error) => {
+                    let google_result = google.await.map_err(|err| format!("Google DoT task failed: {err}"))?;
+                    google_result.map_err(|err| format!("DoT resolve failed for {host}: {first_error}; {err}"))
+                }
+            }
+        },
+        google_result = &mut google => {
+            match google_result.map_err(|err| format!("Google DoT task failed: {err}"))? {
+                Ok(addresses) => Ok(addresses),
+                Err(first_error) => {
+                    let cloudflare_result = cloudflare.await.map_err(|err| format!("Cloudflare DoT task failed: {err}"))?;
+                    cloudflare_result.map_err(|err| format!("DoT resolve failed for {host}: {first_error}; {err}"))
+                }
+            }
+        },
+    }
+}
+
+pub async fn check_github_release(dot_enabled: bool) -> Result<GitHubReleaseInfo> {
+    let mut resolved_hosts = Vec::new();
+    let mut builder = reqwest::Client::builder()
+        .user_agent("G-OpenSteamTool/0.2.0")
+        .timeout(Duration::from_secs(12));
+
+    if dot_enabled {
+        for host in github_domains_for_optimization() {
+            let addresses = resolve_github_domain_with_dot(host).await?;
+            let socket_addrs: Vec<SocketAddr> = addresses
+                .iter()
+                .filter_map(|address| format!("{address}:443").parse::<SocketAddr>().ok())
+                .collect();
+            if !socket_addrs.is_empty() {
+                builder = builder.resolve_to_addrs(host, &socket_addrs);
+                resolved_hosts.push(ResolvedHost {
+                    host: host.to_string(),
+                    addresses,
+                });
+            }
+        }
+    }
+
+    let client = builder.build().map_err(|err| err.to_string())?;
+    let value: Value = client
+        .get("https://api.github.com/repos/G-Yoka/G-OpenSteamTool/releases/latest")
+        .send()
+        .await
+        .map_err(|err| err.to_string())?
+        .error_for_status()
+        .map_err(|err| err.to_string())?
+        .json()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let version = value
+        .get("tag_name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim_start_matches('v')
+        .to_string();
+    if version.is_empty() {
+        return Err("GitHub Releases did not return a tag name".into());
+    }
+
+    let assets = value
+        .get("assets")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|asset| {
+                    Some(GitHubReleaseAsset {
+                        name: asset.get("name")?.as_str()?.to_string(),
+                        browser_download_url: asset
+                            .get("browser_download_url")?
+                            .as_str()?
+                            .to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(GitHubReleaseInfo {
+        version,
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("GitHub Release")
+            .to_string(),
+        published_at: value
+            .get("published_at")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        body: value
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        html_url: value
+            .get("html_url")
+            .and_then(Value::as_str)
+            .unwrap_or("https://github.com/G-Yoka/G-OpenSteamTool/releases/latest")
+            .to_string(),
+        assets,
+        dns_optimized: dot_enabled,
+        resolved_hosts,
+    })
+}
+
+async fn resolve_with_dot_provider(host: &str, cloudflare: bool) -> Result<Vec<String>> {
+    use hickory_resolver::config::{ResolverConfig, ServerGroup};
+    use hickory_resolver::net::runtime::TokioRuntimeProvider;
+    use hickory_resolver::Resolver;
+
+    let cloudflare_ips = [IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))];
+    let google_ips = [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))];
+    let group = if cloudflare {
+        ServerGroup {
+            ips: &cloudflare_ips,
+            server_name: "cloudflare-dns.com",
+            path: "/dns-query",
+        }
+    } else {
+        ServerGroup {
+            ips: &google_ips,
+            server_name: "dns.google",
+            path: "/dns-query",
+        }
+    };
+    let config = ResolverConfig::tls(&group);
+    let resolver = Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .build()
+        .map_err(|err| err.to_string())?;
+    let lookup = resolver
+        .lookup_ip(format!("{host}."))
+        .await
+        .map_err(|err| err.to_string())?;
+    let addresses: Vec<String> = lookup.iter().map(|ip| ip.to_string()).collect();
+    if addresses.is_empty() {
+        Err("empty DNS answer".into())
+    } else {
+        Ok(addresses)
+    }
+}
+
 pub fn read_logs_from_dir<P: AsRef<Path>>(steam_dir: P) -> Result<Vec<LogFile>> {
     let steam_dir = validate_steam_dir(steam_dir)?;
     let log_dir = steam_dir.join("opensteamtool");
@@ -574,14 +774,30 @@ pub fn read_logs_from_dir<P: AsRef<Path>>(steam_dir: P) -> Result<Vec<LogFile>> 
             .and_then(OsStr::to_str)
             .unwrap_or("unknown.log")
             .to_string();
+        let metadata = fs::metadata(&path).map_err(|err| err.to_string())?;
+        let size_bytes = metadata.len();
+        let modified_time = metadata.modified().ok().and_then(system_time_secs);
         let mut content = fs::read_to_string(&path).unwrap_or_else(|_| String::new());
         if content.len() > 80_000 {
             content = content.split_off(content.len() - 80_000);
         }
-        logs.push(LogFile { name, content });
+        let line_count = content.lines().count();
+        logs.push(LogFile {
+            name,
+            content,
+            size_bytes,
+            modified_time,
+            line_count,
+        });
     }
     logs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(logs)
+}
+
+fn system_time_secs(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
 }
 
 pub fn close_steam() -> Result<()> {

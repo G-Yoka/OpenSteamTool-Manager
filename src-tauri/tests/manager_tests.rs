@@ -1,9 +1,9 @@
 use std::fs;
 
 use g_opensteamtool::manager::{
-    delete_game_from_dir, detect_steam_dir_from_candidates, import_lua_file_from_path,
-    install_dlls_from_dir, list_games_from_dir, load_settings_from_dir,
-    parse_steam_manifest_version, remove_dlls_from_dir, render_game_lua,
+    delete_game_from_dir, detect_steam_dir_from_candidates, github_domains_for_optimization,
+    import_lua_file_from_path, install_dlls_from_dir, list_games_from_dir, load_settings_from_dir,
+    parse_steam_manifest_version, read_logs_from_dir, remove_dlls_from_dir, render_game_lua,
     resolve_dll_resource_dir_from_candidates, save_settings_to_dir, scan_state_with_assets,
     set_game_enabled_in_dir, steam_shutdown_command_specs, strip_verbatim_prefix,
     upsert_game_in_dir, validate_steam_dir, DllLoadState, DllState, GameConfig, ManagerSettings,
@@ -414,6 +414,37 @@ fn scan_reports_missing_dll_resources() {
     assert!(!state.dll_resources_ready);
     assert_eq!(state.missing_dll_resources.len(), 3);
     assert!(state.dlls.iter().all(|dll| dll.resource_hash.is_none()));
+}
+
+#[test]
+fn read_logs_returns_metadata_for_log_files() {
+    let steam = make_steam_dir();
+    let log_dir = steam.path().join("opensteamtool");
+    fs::create_dir_all(&log_dir).unwrap();
+    fs::write(
+        log_dir.join("opensteamtool.log"),
+        "2026-05-31 INFO ready\nWARN slow\n",
+    )
+    .unwrap();
+    fs::write(log_dir.join("ignore.txt"), "nope").unwrap();
+
+    let logs = read_logs_from_dir(steam.path()).unwrap();
+
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].name, "opensteamtool.log");
+    assert_eq!(logs[0].line_count, 2);
+    assert!(logs[0].size_bytes > 0);
+    assert!(logs[0].modified_time.is_some());
+}
+
+#[test]
+fn github_dns_optimization_hosts_cover_release_domains() {
+    let hosts = github_domains_for_optimization();
+
+    assert!(hosts.contains(&"github.com"));
+    assert!(hosts.contains(&"api.github.com"));
+    assert!(hosts.contains(&"objects.githubusercontent.com"));
+    assert!(hosts.contains(&"github-releases.githubusercontent.com"));
 }
 
 #[test]

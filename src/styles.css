@@ -325,7 +325,7 @@ select {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(152px, 0.9fr) minmax(132px, 0.78fr) minmax(178px, 1fr);
+  grid-template-rows: minmax(150px, 0.86fr) minmax(158px, 0.92fr) minmax(164px, 0.95fr);
   grid-template-areas:
     "init metrics"
     "dll fetch"
@@ -350,6 +350,19 @@ select {
 
 .dll-list-panel {
   grid-area: dll;
+  display: flex;
+  flex-direction: column;
+}
+
+.dll-list-panel .table {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.dll-list-panel .table-row {
+  min-height: 34px;
 }
 
 .fetch-panel {
@@ -865,8 +878,39 @@ select {
   flex-direction: column;
 }
 
+.log-files-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.log-files-panel > button {
+  margin-top: 10px;
+  flex: 0 0 auto;
+}
+
+.log-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
 .log-list button {
   justify-content: flex-start;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 2px;
+  text-align: left;
+}
+
+.log-list button span,
+.log-list button small {
+  color: #9fb0cf;
+  font-size: 12px;
 }
 
 .log-list button.active {
@@ -874,18 +918,119 @@ select {
   background: rgba(25, 45, 86, 0.82);
 }
 
-.log-viewer pre {
+.log-toolbar {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.log-toolbar select,
+.log-toolbar input {
+  min-height: 32px;
+}
+
+.log-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #b8c6e3;
+  font-size: 12px;
+}
+
+.log-lines {
   min-height: 0;
   flex: 1;
   margin: 0;
-  padding: 14px;
   overflow: auto;
   border: 1px solid rgba(98, 128, 194, 0.2);
   border-radius: 8px;
   background: rgba(3, 8, 18, 0.66);
   color: #d7e4ff;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 128px 58px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(98, 128, 194, 0.09);
+  align-items: start;
+}
+
+.log-line time {
+  color: #8092b6;
+}
+
+.log-line > span {
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #90a0bf;
+}
+
+.log-line p {
+  margin: 0;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.log-lines.wrap .log-line p {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.log-line.error > span,
+.log-line.error p {
+  color: #ff7f99;
+}
+
+.log-line.warn > span,
+.log-line.warn p {
+  color: #ffd274;
+}
+
+.log-line.info > span {
+  color: #31e085;
+}
+
+.log-line.debug > span,
+.log-line.trace > span {
+  color: #88a5d8;
+}
+
+.settings-option {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid rgba(98, 128, 194, 0.18);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(5, 16, 40, 0.34);
+}
+
+.settings-option div {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-option span {
+  color: #9fb0cf;
+  font-size: 12px;
+}
+
+.toggle-button {
+  min-width: 92px;
+  justify-content: center;
+}
+
+.toggle-button.on {
+  border-color: rgba(34, 228, 119, 0.45);
+  background: rgba(18, 87, 64, 0.42);
 }
 
 .about-card {
@@ -904,6 +1049,69 @@ select {
   box-shadow:
     0 18px 60px rgba(0, 0, 0, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.about-page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 210px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.about-page .about-card {
+  height: auto;
+  padding-block: 12px;
+  grid-template-columns: minmax(0, 1fr) 230px;
+}
+
+.about-page .about-art img {
+  width: min(100%, 190px);
+}
+
+.update-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.update-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.update-message {
+  margin: 8px 0;
+  color: #cdd8f1;
+  white-space: pre-wrap;
+}
+
+.release-notes {
+  min-height: 0;
+  max-height: 86px;
+  margin: 0 0 8px;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid rgba(98, 128, 194, 0.16);
+  border-radius: 8px;
+  background: rgba(3, 8, 18, 0.5);
+  color: #b9c8e8;
+  white-space: pre-wrap;
+}
+
+.resolved-hosts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.resolved-hosts span {
+  padding: 4px 7px;
+  border: 1px solid rgba(98, 128, 194, 0.18);
+  border-radius: 999px;
+  color: #9fb0cf;
+  font-size: 11px;
 }
 
 .about-info {

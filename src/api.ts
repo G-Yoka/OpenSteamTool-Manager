@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppMetadata, GameConfig, LogFile, ManagerSettings, ScanState } from "./types";
+import type { AppMetadata, GameConfig, GitHubReleaseInfo, LogFile, ManagerSettings, ScanState } from "./types";
 
 const hasTauri = () => "__TAURI_INTERNALS__" in window;
 
@@ -113,6 +113,27 @@ export async function fetchAppMetadata(appid: number): Promise<AppMetadata> {
 export async function readLogs(steamDir: string): Promise<LogFile[]> {
   if (!hasTauri()) return [];
   return invoke<LogFile[]>("read_logs", { steamDir });
+}
+
+export async function checkGithubRelease(dotEnabled: boolean): Promise<GitHubReleaseInfo> {
+  if (!hasTauri()) {
+    return {
+      version: "0.2.0",
+      name: "Preview",
+      published_at: null,
+      body: "Tauri 应用内可检查 GitHub Releases。",
+      html_url: "https://github.com/G-Yoka/G-OpenSteamTool/releases/latest",
+      assets: [],
+      dns_optimized: dotEnabled,
+      resolved_hosts: [],
+    };
+  }
+  return invoke<GitHubReleaseInfo>("check_github_release", { dotEnabled });
+}
+
+export async function resolveGithubDomainWithDot(host: string): Promise<string[]> {
+  if (!hasTauri()) return [];
+  return invoke<string[]>("resolve_github_domain_with_dot", { host });
 }
 
 export async function closeSteam(): Promise<void> {
